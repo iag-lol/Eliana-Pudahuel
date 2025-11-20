@@ -76,6 +76,8 @@ export interface Shift {
   total_sales?: number | null;
   tickets?: number | null;
   payments_breakdown?: Record<PaymentMethod, number> | null;
+  total_expenses?: number | null;
+  expenses?: ShiftExpense[];
 }
 
 export interface ShiftSummary {
@@ -88,4 +90,16 @@ export interface ReportFilters {
   range: "today" | "week" | "month" | "custom";
   from?: string | null;
   to?: string | null;
+}
+
+export type ExpenseType = "sueldo" | "flete" | "proveedor" | "otro";
+
+export interface ShiftExpense {
+  id: string;
+  shift_id: string;
+  expense_type: ExpenseType;
+  amount: number;
+  supplier_name?: string | null;
+  description?: string | null;
+  created_at: string;
 }
