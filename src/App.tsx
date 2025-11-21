@@ -213,6 +213,20 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 
 const PAYMENT_ORDER: PaymentMethod[] = ["cash", "card", "transfer", "fiado", "staff"];
 
+const safeParseJson = <T,>(value: unknown, fallback: T): T => {
+  if (Array.isArray(value) || (value && typeof value === "object" && !(value instanceof String))) {
+    // Already a parsed object/array
+    return value as T;
+  }
+  if (typeof value !== "string") return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    console.warn("No se pudo parsear JSON, usando fallback", error);
+    return fallback;
+  }
+};
+
 const mapProductRow = (row: any): Product => ({
   id: row.id,
   name: row.name,
@@ -268,10 +282,8 @@ const mapSaleRow = (row: any): Sale => ({
   shiftId: row.shift_id,
   seller: row.seller,
   created_at: row.created_at,
-  items: Array.isArray(row.items)
-    ? row.items
-    : (typeof row.items === "string" ? (JSON.parse(row.items) as SaleItem[]) : []),
-  notes: row.notes
+  items: safeParseJson<SaleItem[]>(row.items, []),
+  notes: safeParseJson<Record<string, unknown> | null>(row.notes, null)
 });
 
 const mapShiftRow = (row: any): Shift => ({
@@ -287,7 +299,7 @@ const mapShiftRow = (row: any): Shift => ({
   difference: row.difference ?? null,
   total_sales: row.total_sales ?? null,
   tickets: row.tickets ?? null,
-  payments_breakdown: row.payments_breakdown ?? null
+  payments_breakdown: safeParseJson<Record<PaymentMethod, number> | null>(row.payments_breakdown, null)
 });
 
 const generateId = () =>
