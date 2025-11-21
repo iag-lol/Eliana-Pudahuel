@@ -213,6 +213,9 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 
 const PAYMENT_ORDER: PaymentMethod[] = ["cash", "card", "transfer", "fiado", "staff"];
 
+const isPaymentMethod = (value: unknown): value is PaymentMethod =>
+  typeof value === "string" && PAYMENT_OPTIONS.some((option) => option.id === value);
+
 const safeParseJson = <T,>(value: unknown, fallback: T): T => {
   if (Array.isArray(value) || (value && typeof value === "object" && !(value instanceof String))) {
     // Already a parsed object/array
@@ -276,7 +279,7 @@ const mapSaleRow = (row: any): Sale => ({
   ticket: row.ticket,
   type: row.type ?? "sale",
   total: row.total ?? 0,
-  paymentMethod: row.payment_method ?? "cash",
+  paymentMethod: isPaymentMethod(row.payment_method) ? row.payment_method : "cash",
   cashReceived: row.cash_received,
   change: row.change_amount,
   shiftId: row.shift_id,
@@ -406,6 +409,7 @@ const computeShiftSummary = (sales: Sale[], shiftId: string | null | undefined):
   };
 
   filtered.forEach((sale) => {
+    if (!isPaymentMethod(sale.paymentMethod)) return;
     if (sale.type === "return") {
       result.byPayment[sale.paymentMethod] -= sale.total;
       result.total -= sale.total;
@@ -4631,14 +4635,21 @@ const DashboardView = ({
   const paymentData = Object.entries(shiftSummary.byPayment)
     .filter(([, value]) => value > 0)
     .map(([method, value]) => {
-      const option = PAYMENT_OPTIONS.find((opt) => opt.id === method)!;
+      const option = PAYMENT_OPTIONS.find((opt) => opt.id === method);
+      if (!option) return null;
       return {
         name: option.label,
         value,
         method: method as PaymentMethod,
         color: PAYMENT_COLORS[method as PaymentMethod]
       };
-    });
+    })
+    .filter(Boolean) as {
+    name: string;
+    value: number;
+    method: PaymentMethod;
+    color: string;
+  }[];
 
   const topProducts = useMemo(() => {
     const productSales = new Map<string, { name: string; quantity: number; revenue: number }>();
