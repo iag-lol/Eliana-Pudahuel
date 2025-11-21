@@ -810,11 +810,11 @@ const ShiftModal = ({
     return Array.from(productMap.values()).sort((a, b) => b.total - a.total);
   }, [activeShift, sales]);
 
-  if (!opened) return null;
-
   const totalExpenses = useMemo(() => {
     return expenses.reduce((sum, expense) => sum + expense.amount, 0);
   }, [expenses]);
+
+  if (!opened) return null;
 
   const handleAddExpense = async () => {
     if (!onAddExpense || !activeShift) return;
