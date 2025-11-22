@@ -92,7 +92,7 @@ export interface ReportFilters {
   to?: string | null;
 }
 
-export type ExpenseType = "sueldo" | "flete" | "proveedor" | "otro";
+export type ExpenseType = "sueldo" | "flete" | "proveedor" | "otro" | "operacion";
 
 export interface ShiftExpense {
   id: string;
@@ -102,4 +102,5 @@ export interface ShiftExpense {
   supplier_name?: string | null;
   description?: string | null;
   created_at: string;
+  paid_from_cash?: boolean;
 }

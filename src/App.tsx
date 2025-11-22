@@ -24,6 +24,7 @@ import {
   Table,
   Text,
   TextInput,
+  Textarea,
   ThemeIcon,
   Title,
   Tooltip,
@@ -213,6 +214,14 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 
 const PAYMENT_ORDER: PaymentMethod[] = ["cash", "card", "transfer", "fiado", "staff"];
 
+const EXPENSE_LABELS: Record<ExpenseType, string> = {
+  sueldo: "Sueldo",
+  flete: "Flete",
+  proveedor: "Proveedor",
+  otro: "Otro",
+  operacion: "Operación"
+};
+
 const isPaymentMethod = (value: unknown): value is PaymentMethod =>
   typeof value === "string" && PAYMENT_OPTIONS.some((option) => option.id === value);
 
@@ -345,7 +354,8 @@ const mapShiftRow = (row: any): Shift => ({
   difference: row.difference ?? null,
   total_sales: row.total_sales ?? null,
   tickets: row.tickets ?? null,
-  payments_breakdown: safeParseJson<Record<PaymentMethod, number> | null>(row.payments_breakdown, null)
+  payments_breakdown: safeParseJson<Record<PaymentMethod, number> | null>(row.payments_breakdown, null),
+  total_expenses: row.total_expenses ?? null
 });
 
 const generateId = () =>
@@ -433,7 +443,8 @@ async function fetchExpenses(shiftId?: string): Promise<ShiftExpense[]> {
     amount: row.amount,
     supplier_name: row.supplier_name,
     description: row.description,
-    created_at: row.created_at
+    created_at: row.created_at,
+    paid_from_cash: row.paid_from_cash ?? false
   }));
 }
 
@@ -766,13 +777,13 @@ interface ShiftModalProps {
   onClose: () => void;
   onOpenShift: (payload: { seller: string; type: ShiftType; initialCash: number }) => void;
   onCloseShift: (payload: { cashCounted: number }) => void;
-  summary: ShiftSummary & { cashExpected: number };
+  summary: ShiftSummary & { cashExpected: number; cashExpenses?: number; totalExpenses?: number };
   activeShift?: Shift;
   sales?: Sale[];
   products?: Product[];
   userRole: "admin" | "manager" | null;
   expenses?: ShiftExpense[];
-  onAddExpense?: (expense: Omit<ShiftExpense, "id" | "created_at">) => Promise<void>;
+  onOpenExpenseModal?: () => void;
   onDeleteExpense?: (expenseId: string) => Promise<void>;
 }
 
@@ -788,20 +799,13 @@ const ShiftModal = ({
   products = [],
   userRole,
   expenses = [],
-  onAddExpense,
+  onOpenExpenseModal,
   onDeleteExpense
 }: ShiftModalProps) => {
   const [seller, setSeller] = useState("");
   const [shiftType, setShiftType] = useState<ShiftType>("dia");
   const [initialCash, setInitialCash] = useState<number | undefined>(undefined);
   const [cashCounted, setCashCounted] = useState<number | undefined>(undefined);
-
-  // Estados para gastos
-  const [expenseModalOpened, setExpenseModalOpened] = useState(false);
-  const [expenseType, setExpenseType] = useState<ExpenseType>("sueldo");
-  const [expenseAmount, setExpenseAmount] = useState<number | undefined>(undefined);
-  const [supplierName, setSupplierName] = useState("");
-  const [expenseDescription, setExpenseDescription] = useState("");
 
   useEffect(() => {
     if (!opened) {
@@ -811,15 +815,6 @@ const ShiftModal = ({
       setCashCounted(undefined);
     }
   }, [opened]);
-
-  useEffect(() => {
-    if (!expenseModalOpened) {
-      setExpenseType("sueldo");
-      setExpenseAmount(undefined);
-      setSupplierName("");
-      setExpenseDescription("");
-    }
-  }, [expenseModalOpened]);
 
   const countedValue = typeof cashCounted === "number" && Number.isFinite(cashCounted) ? cashCounted : undefined;
 
@@ -855,53 +850,11 @@ const ShiftModal = ({
     return expenses.reduce((sum, expense) => sum + expense.amount, 0);
   }, [expenses]);
 
+  const cashExpenses = useMemo(() => {
+    return expenses.filter((expense) => expense.paid_from_cash).reduce((sum, expense) => sum + expense.amount, 0);
+  }, [expenses]);
+
   if (!opened) return null;
-
-  const handleAddExpense = async () => {
-    if (!onAddExpense || !activeShift) return;
-
-    if (!expenseAmount || expenseAmount <= 0) {
-      notifications.show({
-        title: "Campos incompletos",
-        message: "Ingresa el monto del gasto.",
-        color: "orange"
-      });
-      return;
-    }
-
-    if (expenseType === "proveedor" && !supplierName.trim()) {
-      notifications.show({
-        title: "Campos incompletos",
-        message: "Ingresa el nombre del proveedor.",
-        color: "orange"
-      });
-      return;
-    }
-
-    try {
-      await onAddExpense({
-        shift_id: activeShift.id,
-        expense_type: expenseType,
-        amount: expenseAmount,
-        supplier_name: expenseType === "proveedor" ? supplierName : null,
-        description: expenseDescription || null
-      });
-
-      notifications.show({
-        title: "Gasto agregado",
-        message: "El gasto se registró correctamente.",
-        color: "green"
-      });
-
-      setExpenseModalOpened(false);
-    } catch (error) {
-      notifications.show({
-        title: "Error",
-        message: "No se pudo registrar el gasto.",
-        color: "red"
-      });
-    }
-  };
 
   if (mode === "close") {
     const isAdmin = userRole === "admin";
@@ -989,6 +942,80 @@ const ShiftModal = ({
                         </Stack>
                       </Card>
 
+                      {/* Gastos del turno */}
+                      <Card withBorder radius="lg" shadow="sm">
+                        <Stack gap="sm">
+                          <Group justify="space-between" align="center">
+                            <Text fw={700} size="sm" c="dimmed" tt="uppercase">Gastos del turno</Text>
+                            <Button
+                              size="xs"
+                              variant="light"
+                              color="teal"
+                              leftSection={<Plus size={14} />}
+                              onClick={onOpenExpenseModal}
+                            >
+                              Registrar gasto
+                            </Button>
+                          </Group>
+                          <Divider />
+                          <Group justify="space-between">
+                            <Text size="sm" c="dimmed">Total registrado</Text>
+                            <Text fw={700}>{formatCurrency(totalExpenses)}</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="sm" c="dimmed">Pagado en efectivo</Text>
+                            <Badge color="teal" variant="light">
+                              {formatCurrency(cashExpenses)}
+                            </Badge>
+                          </Group>
+                          <Divider />
+                          <ScrollArea h={180}>
+                            <Table highlightOnHover>
+                              <Table.Thead>
+                                <Table.Tr>
+                                  <Table.Th>Tipo</Table.Th>
+                                  <Table.Th>Monto</Table.Th>
+                                  <Table.Th>Proveedor</Table.Th>
+                                  <Table.Th style={{ width: 80 }}></Table.Th>
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {expenses.length === 0 ? (
+                                  <Table.Tr>
+                                    <Table.Td colSpan={4}>
+                                      <Text c="dimmed" size="sm">Aún no registras gastos en este turno.</Text>
+                                    </Table.Td>
+                                  </Table.Tr>
+                                ) : (
+                                  expenses.map((expense) => (
+                                    <Table.Tr key={expense.id}>
+                                      <Table.Td>
+                                        <Badge size="sm" variant="light" color="indigo">
+                                          {EXPENSE_LABELS[expense.expense_type] ?? expense.expense_type}
+                                        </Badge>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Text fw={600}>{formatCurrency(expense.amount)}</Text>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Text size="sm">{expense.supplier_name || "-"}</Text>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        {onDeleteExpense && (
+                                          <ActionIcon color="red" variant="subtle" onClick={() => onDeleteExpense(expense.id)}>
+                                            <Trash2 size={16} />
+                                          </ActionIcon>
+                                        )}
+                                      </Table.Td>
+                                    </Table.Tr>
+                                  ))
+                                )}
+                              </Table.Tbody>
+                            </Table>
+                          </ScrollArea>
+                        </Stack>
+                      </Card>
+
                       {/* Arqueo de caja */}
                       <Card withBorder radius="lg" shadow="sm">
                         <Stack gap="md">
@@ -1034,6 +1061,9 @@ const ShiftModal = ({
                                     : "$0"}
                                 </Text>
                               </Group>
+                              <Text size="xs" c="dimmed">
+                                Incluye gastos en efectivo: {formatCurrency(summary.cashExpenses ?? 0)}
+                              </Text>
                             </Stack>
                           </Paper>
                         </Stack>
@@ -1158,71 +1188,6 @@ const ShiftModal = ({
                 </Button>
               </Group>
             </Paper>
-          </Stack>
-        </Modal>
-
-        {/* Modal para agregar gastos */}
-        <Modal
-          opened={expenseModalOpened}
-          onClose={() => setExpenseModalOpened(false)}
-          title="Registrar Gasto"
-          centered
-          size="md"
-        >
-          <Stack gap="md">
-            <Select
-              label="Tipo de Gasto"
-              data={[
-                { value: "sueldo", label: "Sueldo" },
-                { value: "flete", label: "Flete" },
-                { value: "proveedor", label: "Proveedor" },
-                { value: "otro", label: "Otro" }
-              ]}
-              value={expenseType}
-              onChange={(value) => setExpenseType(value as ExpenseType)}
-            />
-
-            <NumberInput
-              label="Monto"
-              placeholder="Ej: 50000"
-              value={expenseAmount ?? undefined}
-              onChange={(value) => {
-                if (value === "" || value === null) {
-                  setExpenseAmount(undefined);
-                  return;
-                }
-                const parsed = typeof value === "number" ? value : Number(value);
-                setExpenseAmount(Number.isFinite(parsed) ? parsed : undefined);
-              }}
-              min={0}
-              thousandSeparator="."
-              decimalSeparator=","
-            />
-
-            {expenseType === "proveedor" && (
-              <TextInput
-                label="Nombre del Proveedor"
-                placeholder="Ej: Distribuidora Central"
-                value={supplierName}
-                onChange={(event) => setSupplierName(event.currentTarget.value)}
-              />
-            )}
-
-            <TextInput
-              label="Descripción (opcional)"
-              placeholder="Detalles adicionales..."
-              value={expenseDescription}
-              onChange={(event) => setExpenseDescription(event.currentTarget.value)}
-            />
-
-            <Group justify="flex-end" gap="md">
-              <Button variant="default" onClick={() => setExpenseModalOpened(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleAddExpense} leftSection={<Plus size={18} />}>
-                Registrar Gasto
-              </Button>
-            </Group>
           </Stack>
         </Modal>
       </>
@@ -1886,6 +1851,126 @@ const PaymentEditModal = ({ sale, opened, onClose, onSave }: PaymentEditModalPro
   );
 };
 
+interface ShiftExpenseModalProps {
+  opened: boolean;
+  onClose: () => void;
+  onSubmit: (expense: {
+    expense_type: ExpenseType;
+    amount: number;
+    supplier_name: string | null;
+    description: string | null;
+    paid_from_cash: boolean;
+  }) => Promise<void> | void;
+}
+
+const ShiftExpenseModal = ({ opened, onClose, onSubmit }: ShiftExpenseModalProps) => {
+  const [expenseType, setExpenseType] = useState<ExpenseType>("sueldo");
+  const [expenseAmount, setExpenseAmount] = useState<number | undefined>(undefined);
+  const [supplierName, setSupplierName] = useState("");
+  const [expenseDescription, setExpenseDescription] = useState("");
+
+  useEffect(() => {
+    if (!opened) {
+      setExpenseType("sueldo");
+      setExpenseAmount(undefined);
+      setSupplierName("");
+      setExpenseDescription("");
+    }
+  }, [opened]);
+
+  const handleSubmit = async () => {
+    if (!expenseAmount || expenseAmount <= 0) {
+      notifications.show({
+        title: "Campos incompletos",
+        message: "Ingresa el monto del gasto.",
+        color: "orange"
+      });
+      return;
+    }
+
+    if (expenseType === "proveedor" && !supplierName.trim()) {
+      notifications.show({
+        title: "Campos incompletos",
+        message: "Ingresa el nombre del proveedor.",
+        color: "orange"
+      });
+      return;
+    }
+
+    await onSubmit({
+      expense_type: expenseType,
+      amount: expenseAmount,
+      supplier_name: expenseType === "proveedor" ? supplierName.trim() : null,
+      description: expenseDescription.trim() ? expenseDescription.trim() : null,
+      paid_from_cash: true
+    });
+  };
+
+  return (
+    <Modal opened={opened} onClose={onClose} title="Registrar gasto del turno" centered size="md">
+      <Stack gap="md">
+        <Select
+          label="Tipo de Gasto"
+          data={[
+            { value: "sueldo", label: "Sueldo" },
+            { value: "flete", label: "Flete" },
+            { value: "proveedor", label: "Proveedor" },
+            { value: "otro", label: "Otro" }
+          ]}
+          value={expenseType}
+          onChange={(value) => setExpenseType(value as ExpenseType)}
+        />
+
+        <NumberInput
+          label="Monto"
+          placeholder="Ej: 50000"
+          value={expenseAmount ?? undefined}
+          onChange={(value) => {
+            if (value === "" || value === null) {
+              setExpenseAmount(undefined);
+              return;
+            }
+            const parsed = typeof value === "number" ? value : Number(value);
+            setExpenseAmount(Number.isFinite(parsed) ? parsed : undefined);
+          }}
+          min={0}
+          thousandSeparator="."
+          decimalSeparator=","
+        />
+
+        {expenseType === "proveedor" && (
+          <TextInput
+            label="Nombre del Proveedor"
+            placeholder="Ej: Distribuidora Central"
+            value={supplierName}
+            onChange={(event) => setSupplierName(event.currentTarget.value)}
+          />
+        )}
+
+        <TextInput
+          label="Descripción (opcional)"
+          placeholder="Detalles adicionales..."
+          value={expenseDescription}
+          onChange={(event) => setExpenseDescription(event.currentTarget.value)}
+        />
+
+        <Text size="sm" c="dimmed">
+          Este gasto se descontará automáticamente del efectivo esperado del turno.
+        </Text>
+
+        <Group justify="flex-end" gap="md">
+          <Button variant="default" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button onClick={handleSubmit} leftSection={<Plus size={18} />}>
+            Registrar Gasto
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+};
+
 interface FiadoPaymentModalProps {
   opened: boolean;
   client: Client | null;
@@ -2150,6 +2235,10 @@ const AppContent = () => {
   const [fiadoModalMode, setFiadoModalMode] = useState<"abono" | "total">("abono");
 
   const [clientModalOpened, clientModalHandlers] = useDisclosure(false);
+  const [cashOpModalOpened, cashOpModalHandlers] = useDisclosure(false);
+  const [cashOpAmount, setCashOpAmount] = useState<number | undefined>(undefined);
+  const [cashOpNote, setCashOpNote] = useState("");
+  const [shiftExpenseModalOpened, shiftExpenseModalHandlers] = useDisclosure(false);
 
   // Inventory states
   const [inventorySearch, setInventorySearch] = useState("");
@@ -2176,6 +2265,25 @@ const AppContent = () => {
       setPendingTab(null);
     }
   }, [userRole, pendingTab]);
+
+  useEffect(() => {
+    if (selectedPayment === "fiado") {
+      if (authorizedFiadoClients.length === 0) {
+        notifications.show({
+          title: "Sin clientes autorizados",
+          message: "Autoriza un cliente para usar el modo fiado o elige otro método de pago.",
+          color: "orange"
+        });
+        setSelectedPayment("cash");
+        setSelectedFiadoClient(null);
+        return;
+      }
+
+      if (!selectedFiadoClient || !authorizedFiadoClients.some((client) => client.id === selectedFiadoClient)) {
+        setSelectedFiadoClient(authorizedFiadoClients[0]?.id ?? null);
+      }
+    }
+  }, [selectedPayment, authorizedFiadoClients, selectedFiadoClient]);
 
   const productQuery = useQuery({
     queryKey: ["products"],
@@ -2205,6 +2313,7 @@ const AppContent = () => {
   const clients = clientsQuery.data ?? [];
   const sales = salesQuery.data ?? [];
   const shifts = shiftsQuery.data ?? [];
+  const authorizedFiadoClients = useMemo(() => clients.filter((client) => client.authorized), [clients]);
   const activeShift = useMemo(() => shifts.find((shift) => shift.status === "open"), [shifts]);
   const shiftSummary = useMemo(() => computeShiftSummary(sales, activeShift?.id ?? null), [sales, activeShift]);
 
@@ -2216,6 +2325,17 @@ const AppContent = () => {
   });
 
   const shiftExpenses = expensesQuery.data ?? [];
+  const totalExpensesAmount = useMemo(
+    () => shiftExpenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0),
+    [shiftExpenses]
+  );
+  const cashExpensesTotal = useMemo(
+    () =>
+      shiftExpenses
+        .filter((expense) => expense.paid_from_cash)
+        .reduce((sum, expense) => sum + (expense.amount ?? 0), 0),
+    [shiftExpenses]
+  );
 
   const productMap = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
   const cartDetailed = useMemo(() => {
@@ -2320,13 +2440,40 @@ const AppContent = () => {
   };
 
   const handleSelectPayment = (paymentId: PaymentMethod) => {
+    if (paymentId === "fiado") {
+      if (authorizedFiadoClients.length === 0) {
+        notifications.show({
+          title: "Sin clientes autorizados",
+          message: "No hay clientes autorizados para fiar. Autoriza uno en la sección de fiados.",
+          color: "orange"
+        });
+        return;
+      }
+
+      if (!selectedFiadoClient || !authorizedFiadoClients.some((client) => client.id === selectedFiadoClient)) {
+        setSelectedFiadoClient(authorizedFiadoClients[0].id);
+      }
+    } else {
+      setSelectedFiadoClient(null);
+    }
+
     setSelectedPayment(paymentId);
+
     if (paymentId !== "cash") {
       setCashReceived(undefined);
     }
-    if (paymentId !== "fiado") {
-      setSelectedFiadoClient(null);
+  };
+
+  const handleOpenExpenseModal = () => {
+    if (!activeShift) {
+      notifications.show({
+        title: "Turno cerrado",
+        message: "Abre un turno para registrar gastos del turno.",
+        color: "red"
+      });
+      return;
     }
+    shiftExpenseModalHandlers.open();
   };
 
   const handleAddProductToCart = useCallback(
@@ -2781,7 +2928,7 @@ const AppContent = () => {
     if (!activeShift) return;
     const summary = computeShiftSummary(sales, activeShift.id);
     const initialCash = activeShift.initial_cash ?? 0;
-    const cashExpected = initialCash + (summary.byPayment.cash ?? 0);
+    const cashExpected = initialCash + (summary.byPayment.cash ?? 0) - cashExpensesTotal;
     const difference = cashCounted - cashExpected;
     const { error } = await supabase
       .from("pudahuel_shifts")
@@ -2793,7 +2940,8 @@ const AppContent = () => {
         difference,
         total_sales: summary.total,
         tickets: summary.tickets,
-        payments_breakdown: summary.byPayment
+        payments_breakdown: summary.byPayment,
+        total_expenses: totalExpensesAmount
       })
       .eq("id", activeShift.id);
 
@@ -2822,7 +2970,8 @@ const AppContent = () => {
       expense_type: expense.expense_type,
       amount: expense.amount,
       supplier_name: expense.supplier_name,
-      description: expense.description
+      description: expense.description,
+      paid_from_cash: expense.paid_from_cash ?? true
     });
 
     if (error) {
@@ -2834,6 +2983,94 @@ const AppContent = () => {
       throw error;
     }
 
+    await queryClient.invalidateQueries({ queryKey: ["expenses"] });
+  };
+
+  const handleSaveShiftExpense = async (expense: {
+    expense_type: ExpenseType;
+    amount: number;
+    supplier_name: string | null;
+    description: string | null;
+    paid_from_cash: boolean;
+  }) => {
+    if (!activeShift) {
+      notifications.show({
+        title: "Turno cerrado",
+        message: "Debes abrir un turno para registrar gastos en efectivo.",
+        color: "red"
+      });
+      return;
+    }
+
+    try {
+      await handleAddExpense({
+        shift_id: activeShift.id,
+        expense_type: expense.expense_type,
+        amount: expense.amount,
+        supplier_name: expense.supplier_name,
+        description: expense.description,
+        paid_from_cash: expense.paid_from_cash
+      });
+
+      notifications.show({
+        title: "Gasto registrado",
+        message: "El gasto se descontó del efectivo esperado del turno.",
+        color: "teal"
+      });
+
+      shiftExpenseModalHandlers.close();
+    } catch (error) {
+      // La notificación de error ya se muestra en handleAddExpense
+    }
+  };
+
+  const handleCashOperation = async () => {
+    if (!activeShift) {
+      notifications.show({
+        title: "Turno cerrado",
+        message: "Debes abrir un turno para registrar gastos en efectivo.",
+        color: "red"
+      });
+      return;
+    }
+
+    const amountValue = typeof cashOpAmount === "number" && cashOpAmount > 0 ? cashOpAmount : null;
+    if (!amountValue) {
+      notifications.show({
+        title: "Monto requerido",
+        message: "Ingresa el monto en efectivo a entregar.",
+        color: "orange"
+      });
+      return;
+    }
+
+    const { error } = await supabase.from("pudahuel_shift_expenses").insert({
+      shift_id: activeShift.id,
+      expense_type: "operacion",
+      amount: amountValue,
+      supplier_name: "Gasto operativo",
+      description: cashOpNote || null,
+      paid_from_cash: true
+    });
+
+    if (error) {
+      notifications.show({
+        title: "No se pudo registrar el gasto",
+        message: error.message,
+        color: "red"
+      });
+      return;
+    }
+
+    notifications.show({
+      title: "Gasto en efectivo registrado",
+      message: "El monto se descontó del efectivo esperado.",
+      color: "teal"
+    });
+
+    setCashOpAmount(undefined);
+    setCashOpNote("");
+    cashOpModalHandlers.close();
     await queryClient.invalidateQueries({ queryKey: ["expenses"] });
   };
 
@@ -3686,6 +3923,45 @@ const AppContent = () => {
                     </Stack>
                   </Paper>
                 </SimpleGrid>
+                <Card withBorder radius="lg" shadow="sm">
+                  <Group justify="space-between" align="center">
+                    <Stack gap={4}>
+                      <Group gap="xs">
+                        <ThemeIcon variant="gradient" gradient={{ from: "teal", to: "cyan" }} radius="md">
+                          <Coins size={18} />
+                        </ThemeIcon>
+                        <Text fw={700}>Gastos en efectivo del turno</Text>
+                      </Group>
+                      <Text size="sm" c="dimmed">
+                        Registra entregas o gastos pagados en efectivo. Se descuentan del efectivo esperado al cerrar turno.
+                      </Text>
+                      {cashExpensesTotal > 0 && (
+                        <Text size="sm" fw={600} c="teal">
+                          Acumulado turno: {formatCurrency(cashExpensesTotal)}
+                        </Text>
+                      )}
+                    </Stack>
+                    <Button
+                      size="sm"
+                      variant="gradient"
+                      gradient={{ from: "teal", to: "green" }}
+                      leftSection={<Wallet size={16} />}
+                      onClick={() => {
+                        if (!activeShift) {
+                          notifications.show({
+                            title: "Turno cerrado",
+                            message: "Abre un turno para registrar gastos en efectivo.",
+                            color: "red"
+                          });
+                          return;
+                        }
+                        cashOpModalHandlers.open();
+                      }}
+                    >
+                      Registrar gasto
+                    </Button>
+                  </Group>
+                </Card>
                 <Grid gutter="xl">
                   <Grid.Col span={{ base: 12, xl: 7 }}>
                     <Stack gap="md">
@@ -3923,7 +4199,7 @@ const AppContent = () => {
                           <Stack gap="md">
                             <Stack gap="xs">
                               <Text fw={600} size="sm">Método de pago</Text>
-                              <Group gap="xs">
+                              <Group gap="xs" wrap="wrap">
                                 {PAYMENT_OPTIONS.map((option) => (
                                   <Button
                                     key={option.id}
@@ -3942,18 +4218,31 @@ const AppContent = () => {
                                     {option.label}
                                   </Button>
                                 ))}
+                                <Button
+                                  variant="outline"
+                                  color="teal"
+                                  size="sm"
+                                  leftSection={<PiggyBank size={16} />}
+                                  onClick={handleOpenExpenseModal}
+                                  style={{ minWidth: "fit-content", height: "2.5rem", fontWeight: 700 }}
+                                >
+                                  Registrar gasto
+                                </Button>
                               </Group>
+                              {activeShift && (
+                                <Text size="xs" c="dimmed">
+                                  Gastos en efectivo del turno: {formatCurrency(cashExpensesTotal)}
+                                </Text>
+                              )}
                             </Stack>
                             {selectedPayment === "fiado" && (
                               <Select
                                 label="Cliente autorizado"
                                 placeholder="Selecciona un cliente"
-                                data={clients
-                                  .filter((client) => client.authorized)
-                                  .map((client) => ({
-                                    value: client.id,
-                                    label: `${client.name} • ${formatCurrency(client.balance)}`
-                                  }))}
+                                data={authorizedFiadoClients.map((client) => ({
+                                  value: client.id,
+                                  label: `${client.name} • ${formatCurrency(client.balance)}`
+                                }))}
                                 value={selectedFiadoClient}
                                 onChange={(value) => setSelectedFiadoClient(value)}
                               />
@@ -4150,14 +4439,25 @@ const AppContent = () => {
         onClose={shiftModalHandlers.close}
         onOpenShift={handleOpenShift}
         onCloseShift={handleCloseShift}
-        summary={{ ...shiftSummary, cashExpected: (activeShift?.initial_cash ?? 0) + (shiftSummary.byPayment.cash ?? 0) }}
+        summary={{
+          ...shiftSummary,
+          cashExpected: (activeShift?.initial_cash ?? 0) + (shiftSummary.byPayment.cash ?? 0) - cashExpensesTotal,
+          cashExpenses: cashExpensesTotal,
+          totalExpenses: totalExpensesAmount
+        }}
         activeShift={activeShift}
         sales={sales}
         products={products}
         userRole={userRole}
         expenses={shiftExpenses}
-        onAddExpense={handleAddExpense}
+        onOpenExpenseModal={handleOpenExpenseModal}
         onDeleteExpense={handleDeleteExpense}
+      />
+
+      <ShiftExpenseModal
+        opened={shiftExpenseModalOpened}
+        onClose={shiftExpenseModalHandlers.close}
+        onSubmit={handleSaveShiftExpense}
       />
 
       <ClientModal
@@ -4185,6 +4485,43 @@ const AppContent = () => {
         onChangeRefundMethod={setReturnRefundMethod}
         onConfirm={handleRegisterReturn}
       />
+
+      <Modal opened={cashOpModalOpened} onClose={cashOpModalHandlers.close} title="Gasto operativo en efectivo" centered>
+        <Stack gap="md">
+          <NumberInput
+            label="Monto en efectivo"
+            placeholder="Ej: 20000"
+            value={cashOpAmount ?? undefined}
+            onChange={(value) => {
+              if (value === "" || value === null) {
+                setCashOpAmount(undefined);
+                return;
+              }
+              const parsed = typeof value === "number" ? value : Number(value);
+              setCashOpAmount(Number.isFinite(parsed) ? parsed : undefined);
+            }}
+            min={0}
+            thousandSeparator="."
+            decimalSeparator=","
+            required
+          />
+          <Textarea
+            label="Detalle/observación"
+            placeholder="Describe para qué se entrega el efectivo"
+            value={cashOpNote}
+            onChange={(event) => setCashOpNote(event.currentTarget.value)}
+            minRows={2}
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={cashOpModalHandlers.close}>
+              Cancelar
+            </Button>
+            <Button variant="filled" color="teal" onClick={handleCashOperation} leftSection={<Wallet size={16} />}>
+              Registrar gasto
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <PaymentEditModal
         opened={Boolean(paymentEditSaleId)}
@@ -5511,6 +5848,7 @@ interface ShiftsViewProps {
 const ShiftsView = ({ activeShift, summary, history, sales, products }: ShiftsViewProps) => {
   const safeSales = (sales ?? []).filter((sale): sale is Sale => Boolean(sale && sale.id));
   const safeHistory = history ?? [];
+  const activeShiftExpenses = activeShift?.total_expenses ?? 0;
 
   const closedCount = safeHistory.length;
   const totalSales = safeHistory.reduce((acc, shift) => acc + (shift.total_sales ?? 0), 0);
@@ -5713,10 +6051,10 @@ const ShiftsView = ({ activeShift, summary, history, sales, products }: ShiftsVi
                         EFECTIVO EN CAJA
                       </Text>
                       <Text fw={700} size="xl" c="teal">
-                        {formatCurrency((activeShift.initial_cash ?? 0) + (summary.byPayment.cash ?? 0))}
+                        {formatCurrency((activeShift.initial_cash ?? 0) + (summary.byPayment.cash ?? 0) - activeShiftExpenses)}
                       </Text>
                       <Text size="xs" c="dimmed">
-                        Inicial: {formatCurrency(activeShift.initial_cash ?? 0)}
+                        Inicial: {formatCurrency(activeShift.initial_cash ?? 0)} • Gastos: {formatCurrency(activeShiftExpenses)}
                       </Text>
                     </Stack>
                   </Paper>
@@ -5734,6 +6072,22 @@ const ShiftsView = ({ activeShift, summary, history, sales, products }: ShiftsVi
                     </Stack>
                   </Paper>
                 </SimpleGrid>
+
+                <Paper withBorder p="sm" radius="md">
+                  <Stack gap={6}>
+                    <Group justify="space-between">
+                      <Text size="sm" fw={600} c="dimmed">
+                        GASTOS DEL TURNO
+                      </Text>
+                      <Badge color="teal" variant="light">
+                        {formatCurrency(activeShiftExpenses)}
+                      </Badge>
+                    </Group>
+                    <Text size="xs" c="dimmed">
+                      Se descontarán del efectivo esperado al cerrar el turno.
+                    </Text>
+                  </Stack>
+                </Paper>
 
                 <Paper withBorder p="sm" radius="md">
                   <Stack gap="xs">
@@ -5879,7 +6233,7 @@ const ShiftsView = ({ activeShift, summary, history, sales, products }: ShiftsVi
                         </Paper>
 
                         {/* Resumen financiero */}
-                        <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
+                        <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }} spacing="md">
                           <Paper withBorder p="md" radius="md">
                             <Stack gap={4}>
                               <Text size="xs" c="dimmed" fw={600}>
@@ -5893,7 +6247,17 @@ const ShiftsView = ({ activeShift, summary, history, sales, products }: ShiftsVi
                           <Paper withBorder p="md" radius="md">
                             <Stack gap={4}>
                               <Text size="xs" c="dimmed" fw={600}>
-                                EFECTIVO ESPERADO
+                                GASTOS DEL TURNO
+                              </Text>
+                              <Text fw={700} size="lg">
+                                {formatCurrency(shift.total_expenses ?? 0)}
+                              </Text>
+                            </Stack>
+                          </Paper>
+                          <Paper withBorder p="md" radius="md">
+                            <Stack gap={4}>
+                              <Text size="xs" c="dimmed" fw={600}>
+                                EFECTIVO ESPERADO (NETO)
                               </Text>
                               <Text fw={700} size="lg">
                                 {formatCurrency(shift.cash_expected ?? 0)}
