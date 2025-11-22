@@ -2266,25 +2266,6 @@ const AppContent = () => {
     }
   }, [userRole, pendingTab]);
 
-  useEffect(() => {
-    if (selectedPayment === "fiado") {
-      if (authorizedFiadoClients.length === 0) {
-        notifications.show({
-          title: "Sin clientes autorizados",
-          message: "Autoriza un cliente para usar el modo fiado o elige otro método de pago.",
-          color: "orange"
-        });
-        setSelectedPayment("cash");
-        setSelectedFiadoClient(null);
-        return;
-      }
-
-      if (!selectedFiadoClient || !authorizedFiadoClients.some((client) => client.id === selectedFiadoClient)) {
-        setSelectedFiadoClient(authorizedFiadoClients[0]?.id ?? null);
-      }
-    }
-  }, [selectedPayment, authorizedFiadoClients, selectedFiadoClient]);
-
   const productQuery = useQuery({
     queryKey: ["products"],
     queryFn: fetchProducts,
@@ -2316,6 +2297,25 @@ const AppContent = () => {
   const authorizedFiadoClients = useMemo(() => clients.filter((client) => client.authorized), [clients]);
   const activeShift = useMemo(() => shifts.find((shift) => shift.status === "open"), [shifts]);
   const shiftSummary = useMemo(() => computeShiftSummary(sales, activeShift?.id ?? null), [sales, activeShift]);
+
+  useEffect(() => {
+    if (selectedPayment === "fiado") {
+      if (authorizedFiadoClients.length === 0) {
+        notifications.show({
+          title: "Sin clientes autorizados",
+          message: "Autoriza un cliente para usar el modo fiado o elige otro método de pago.",
+          color: "orange"
+        });
+        setSelectedPayment("cash");
+        setSelectedFiadoClient(null);
+        return;
+      }
+
+      if (!selectedFiadoClient || !authorizedFiadoClients.some((client) => client.id === selectedFiadoClient)) {
+        setSelectedFiadoClient(authorizedFiadoClients[0]?.id ?? null);
+      }
+    }
+  }, [selectedPayment, authorizedFiadoClients, selectedFiadoClient]);
 
   const expensesQuery = useQuery({
     queryKey: ["expenses", activeShift?.id],
