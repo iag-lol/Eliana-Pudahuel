@@ -5509,14 +5509,17 @@ interface ShiftsViewProps {
 }
 
 const ShiftsView = ({ activeShift, summary, history, sales, products }: ShiftsViewProps) => {
-  const closedCount = history.length;
-  const totalSales = history.reduce((acc, shift) => acc + (shift.total_sales ?? 0), 0);
-  const totalDifferences = history.reduce((acc, shift) => acc + (shift.difference ?? 0), 0);
+  const safeSales = (sales ?? []).filter((sale): sale is Sale => Boolean(sale && sale.id));
+  const safeHistory = history ?? [];
+
+  const closedCount = safeHistory.length;
+  const totalSales = safeHistory.reduce((acc, shift) => acc + (shift.total_sales ?? 0), 0);
+  const totalDifferences = safeHistory.reduce((acc, shift) => acc + (shift.difference ?? 0), 0);
   const averageSales = closedCount > 0 ? totalSales / closedCount : 0;
 
   // Función para obtener productos vendidos por turno
   const getShiftProducts = (shiftId: string) => {
-    const shiftSales = sales.filter((sale) => sale.shiftId === shiftId && sale.type === "sale");
+    const shiftSales = safeSales.filter((sale) => sale.shiftId === shiftId && sale.type === "sale");
     const productMap = new Map<string, { name: string; quantity: number; total: number }>();
 
     shiftSales.forEach((sale) => {
