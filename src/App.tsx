@@ -283,7 +283,7 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
 }
 
 const mapProductRow = (row: any): Product => ({
-  id: row.id,
+  id: row.id?.toString?.() ?? String(row.id),
   name: row.name,
   barcode: row.barcode,
   category: row.category,
@@ -317,7 +317,7 @@ const mapClientRow = (row: any): Client => {
   }
 
   return {
-    id: row.id,
+    id: row.id?.toString?.() ?? String(row.id),
     name: row.name,
     authorized: row.authorized ?? false,
     balance: toNumber(row.balance),
@@ -327,14 +327,14 @@ const mapClientRow = (row: any): Client => {
 };
 
 const mapSaleRow = (row: any): Sale => ({
-  id: row.id,
-  ticket: row.ticket,
+  id: row.id?.toString?.() ?? String(row.id),
+  ticket: row.ticket?.toString?.() ?? String(row.ticket),
   type: row.type ?? "sale",
   total: row.total ?? 0,
   paymentMethod: isPaymentMethod(row.payment_method) ? row.payment_method : "cash",
   cashReceived: row.cash_received,
   change: row.change_amount,
-  shiftId: row.shift_id,
+  shiftId: row.shift_id?.toString?.() ?? (row.shift_id ?? null),
   seller: row.seller,
   created_at: row.created_at,
   items: safeParseJson<SaleItem[]>(row.items, []),
@@ -342,7 +342,7 @@ const mapSaleRow = (row: any): Sale => ({
 });
 
 const mapShiftRow = (row: any): Shift => ({
-  id: row.id,
+  id: row.id?.toString?.() ?? String(row.id),
   seller: row.seller,
   type: row.type ?? "dia",
   start: row.start_time ?? row.start ?? row.created_at,
