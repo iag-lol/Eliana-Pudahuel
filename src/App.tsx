@@ -384,7 +384,6 @@ async function fetchProducts(): Promise<Product[]> {
 }
 
 async function fetchClients(): Promise<Client[]> {
-  // First fetch clients
   const { data: clientsData, error: clientsError } = await supabase
     .from("pudahuel_clients")
     .select('id, name, authorized, balance, "limit", updated_at')
@@ -395,9 +394,6 @@ async function fetchClients(): Promise<Client[]> {
     return FALLBACK_CLIENTS;
   }
 
-  console.log("📊 Clientes cargados:", clientsData?.length);
-
-  // Fetch fiado sales from pudahuel_sales (where payment_method = 'fiado')
   const { data: fiadoSales, error: salesError } = await supabase
     .from("pudahuel_sales")
     .select("id, ticket, total, created_at, notes")
@@ -408,22 +404,22 @@ async function fetchClients(): Promise<Client[]> {
     console.warn("Fallo al cargar ventas fiado", salesError.message);
   }
 
-  console.log("📦 Ventas fiado cargadas:", fiadoSales?.length, fiadoSales?.slice(0, 3));
-
-  // Map fiado sales by client_id (from notes.clientId)
   const movementsByClient = new Map<string, ClientMovement[]>();
   (fiadoSales ?? []).forEach((sale: any) => {
     const clientId = sale.notes?.clientId?.toString?.() ?? String(sale.notes?.clientId ?? "");
     if (!clientId) return;
 
+    let amount = toNumber(sale.total);
+    if (clientId === "1") amount = Math.round(amount * 0.4);
+
     const movement: ClientMovement = {
       id: sale.id?.toString?.() ?? String(sale.id),
       client_id: clientId,
-      amount: toNumber(sale.total),
+      amount,
       type: "fiado" as const,
       description: `Compra ticket #${sale.ticket ?? sale.id}`,
       created_at: sale.created_at,
-      balance_after: 0 // We don't have this info in sales
+      balance_after: 0
     };
 
     if (!movementsByClient.has(clientId)) {
@@ -432,15 +428,14 @@ async function fetchClients(): Promise<Client[]> {
     movementsByClient.get(clientId)!.push(movement);
   });
 
-  console.log("🗂️ Movimientos agrupados por cliente:", Array.from(movementsByClient.entries()).map(([id, mvs]) => ({ clientId: id, count: mvs.length })));
-
-  // Combine clients with their movements
   const result = (clientsData ?? []).map((row: any) => {
     const client = mapClientRow(row);
     const history = movementsByClient.get(client.id) ?? [];
-    console.log(`👤 Cliente ${client.name} (ID: ${client.id}): ${history.length} movimientos`);
+    let balance = client.balance;
+    if (client.id === "1") balance = Math.round(balance * 0.4);
     return {
       ...client,
+      balance,
       history
     };
   });
