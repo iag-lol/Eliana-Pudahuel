@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     ActionIcon,
     Badge,
@@ -82,10 +82,16 @@ export const FiadosViewEnhanced = ({
     onUpdatePaymentSchedule
 }: FiadosViewProps) => {
     const [drawerOpened, { open: openDrawer, close: closeDrawer }] = useDisclosure(false);
-    const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+    const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
     const [dateFrom, setDateFrom] = useState<Date | null>(null);
     const [dateTo, setDateTo] = useState<Date | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+
+    // Get the selected client from the fresh clients array to ensure history is up-to-date
+    const selectedClient = useMemo(() => {
+        if (!selectedClientId) return null;
+        return clients.find(c => c.id === selectedClientId) ?? null;
+    }, [clients, selectedClientId]);
 
     const totalDebt = clients.reduce((acc, client) => acc + client.balance, 0);
     const authorizedCount = clients.filter((client) => client.authorized).length;
@@ -138,7 +144,7 @@ export const FiadosViewEnhanced = ({
         .slice(0, 10);
 
     const handleOpenClientDetail = (client: Client) => {
-        setSelectedClient(client);
+        setSelectedClientId(client.id);
         setDateFrom(null);
         setDateTo(null);
         openDrawer();

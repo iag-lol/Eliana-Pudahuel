@@ -384,9 +384,15 @@ async function fetchProducts(): Promise<Product[]> {
 }
 
 async function fetchClients(): Promise<Client[]> {
+  // Fetch clients with their movements using a join
   const { data, error } = await supabase
     .from("pudahuel_clients")
-    .select('id, name, authorized, balance, "limit", updated_at')
+    .select(`
+      id, name, authorized, balance, "limit", updated_at,
+      pudahuel_client_movements (
+        id, client_id, amount, type, description, created_at, balance_after
+      )
+    `)
     .order("name", { ascending: true });
 
   if (error) {
@@ -394,7 +400,18 @@ async function fetchClients(): Promise<Client[]> {
     return FALLBACK_CLIENTS;
   }
 
-  return (data ?? []).map(mapClientRow);
+  return (data ?? []).map((row: any) => ({
+    ...mapClientRow(row),
+    history: (row.pudahuel_client_movements ?? []).map((m: any) => ({
+      id: m.id?.toString?.() ?? String(m.id),
+      client_id: m.client_id?.toString?.() ?? String(m.client_id),
+      amount: toNumber(m.amount),
+      type: m.type as "abono" | "pago-total" | "fiado",
+      description: m.description ?? "",
+      created_at: m.created_at,
+      balance_after: toNumber(m.balance_after)
+    }))
+  }));
 }
 
 async function fetchSales(): Promise<Sale[]> {
