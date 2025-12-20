@@ -133,6 +133,13 @@ export const FiadosViewEnhanced = ({
         return { totalFiado, totalAbonos, count: filteredMovements.length };
     }, [filteredMovements]);
 
+    const totalPendiente = useMemo(() => {
+        if (!selectedClient?.history) return 0;
+        return selectedClient.history
+            .filter(m => m.type === "fiado")
+            .reduce((sum, m) => sum + m.amount, 0);
+    }, [selectedClient]);
+
     const movementTimeline = clients
         .flatMap((client) =>
             (client.history ?? []).map((item) => ({
@@ -552,8 +559,8 @@ export const FiadosViewEnhanced = ({
                                     </Box>
                                     <Box>
                                         <Text size="sm" c="dimmed">Saldo pendiente</Text>
-                                        <Text fw={700} c={selectedClient.balance > 0 ? "red" : "teal"}>
-                                            {formatCurrency(selectedClient.balance)}
+                                        <Text fw={700} c={totalPendiente > 0 ? "red" : "teal"}>
+                                            {formatCurrency(totalPendiente)}
                                         </Text>
                                     </Box>
                                 </SimpleGrid>
@@ -630,8 +637,8 @@ export const FiadosViewEnhanced = ({
                             <Paper withBorder radius="md" p="sm" style={{ background: "rgba(219, 234, 254, 0.5)" }}>
                                 <Stack gap={2} align="center">
                                     <Text size="xs" c="dimmed">Saldo Pendiente Total</Text>
-                                    <Text fw={700} fz="lg" c="indigo.7">{formatCurrency(selectedClient?.balance ?? 0)}</Text>
-                                    <Text size="xs" c="dimmed">Deuda actual</Text>
+                                    <Text fw={700} fz="lg" c="indigo.7">{formatCurrency(totalPendiente)}</Text>
+                                    <Text size="xs" c="dimmed">{selectedClient?.history?.length ?? 0} compras total</Text>
                                 </Stack>
                             </Paper>
                         </SimpleGrid>
