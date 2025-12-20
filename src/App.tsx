@@ -2919,7 +2919,8 @@ const AppContent = () => {
           amount: cartTotals.total,
           type: "fiado",
           description: `Compra ticket #${data?.ticket ?? "sin-ticket"}`,
-          balance_after: newBalance
+          balance_after: newBalance,
+          created_at: timestamp
         });
       }
     }
