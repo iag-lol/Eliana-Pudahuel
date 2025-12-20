@@ -56,6 +56,7 @@ import {
   Banknote,
   BarChart3,
   BoxIcon,
+  Calendar,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -66,6 +67,8 @@ import {
   Coins,
   DollarSign,
   Edit,
+  Eye,
+  FileDown,
   Filter,
   KeyRound,
   LayoutDashboard,
@@ -99,6 +102,7 @@ import {
   ClientMovement,
   ExpenseType,
   PaymentMethod,
+  PaymentSchedule,
   Product,
   ReportFilters,
   Sale,
@@ -110,6 +114,8 @@ import {
 } from "./types";
 import { FALLBACK_CLIENTS, FALLBACK_PRODUCTS, FALLBACK_SALES, FALLBACK_SHIFTS } from "./data/fallback";
 import { formatCurrency, formatDate, formatDateTime, formatTime } from "./utils/format";
+import { generateClientReport, generateSummaryReport } from "./utils/pdfGenerator";
+import { FiadosViewEnhanced } from "./components/FiadosViewEnhanced";
 
 dayjs.extend(relativeTime);
 dayjs.locale("es");
@@ -2575,9 +2581,9 @@ const AppContent = () => {
         // Calcular velocidad promedio de teclas
         const avgSpeed = keyTimes.length > 1
           ? keyTimes.reduce((acc, val, idx, arr) => {
-              if (idx === 0) return 0;
-              return acc + (val - arr[idx - 1]);
-            }, 0) / (keyTimes.length - 1)
+            if (idx === 0) return 0;
+            return acc + (val - arr[idx - 1]);
+          }, 0) / (keyTimes.length - 1)
           : 0;
 
         console.log("⏱️ Velocidad promedio:", avgSpeed.toFixed(2), "ms");
@@ -2592,7 +2598,7 @@ const AppContent = () => {
 
           // Limpiar cualquier input que pueda tener el foco
           if (document.activeElement instanceof HTMLInputElement ||
-              document.activeElement instanceof HTMLTextAreaElement) {
+            document.activeElement instanceof HTMLTextAreaElement) {
             document.activeElement.blur();
           }
 
@@ -2615,7 +2621,7 @@ const AppContent = () => {
       // Verificar si el usuario está escribiendo en un input
       const activeElement = document.activeElement;
       const isTypingInInput = activeElement instanceof HTMLInputElement ||
-                              activeElement instanceof HTMLTextAreaElement;
+        activeElement instanceof HTMLTextAreaElement;
 
       // Limpiar timeout anterior
       if (resetTimeout) {
@@ -4340,7 +4346,7 @@ const AppContent = () => {
               />
             )}
             {activeTab === "fiados" && (
-              <FiadosView
+              <FiadosViewEnhanced
                 clients={clients}
                 onAuthorize={handleAuthorizeFiado}
                 onOpenModal={(clientId, mode) => {
@@ -4387,23 +4393,23 @@ const AppContent = () => {
         >
           <Stack gap="sm">
             <Grid gutter="xs">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const disabled = !hasAccess(tab);
-              return (
-                <Grid.Col key={tab.id} span={12 / TABS.length}>
-                  <Button
-                    variant={activeTab === tab.id ? "light" : "subtle"}
-                    fullWidth
-                    onClick={() => guardTabChange(tab.id)}
-                    leftSection={<Icon size={18} />}
-                    style={{ opacity: disabled ? 0.6 : 1 }}
-                  >
-                    {tab.label}
-                  </Button>
-                </Grid.Col>
-              );
-            })}
+              {TABS.map((tab) => {
+                const Icon = tab.icon;
+                const disabled = !hasAccess(tab);
+                return (
+                  <Grid.Col key={tab.id} span={12 / TABS.length}>
+                    <Button
+                      variant={activeTab === tab.id ? "light" : "subtle"}
+                      fullWidth
+                      onClick={() => guardTabChange(tab.id)}
+                      leftSection={<Icon size={18} />}
+                      style={{ opacity: disabled ? 0.6 : 1 }}
+                    >
+                      {tab.label}
+                    </Button>
+                  </Grid.Col>
+                );
+              })}
             </Grid>
             {userRole ? (
               <Button size="sm" variant="light" color="yellow" onClick={handleLockAdmin}>
@@ -5033,11 +5039,11 @@ const DashboardView = ({
       };
     })
     .filter(Boolean) as {
-    name: string;
-    value: number;
-    method: PaymentMethod;
-    color: string;
-  }[];
+      name: string;
+      value: number;
+      method: PaymentMethod;
+      color: string;
+    }[];
 
   const topProducts = useMemo(() => {
     const productSales = new Map<string, { name: string; quantity: number; revenue: number }>();
@@ -5962,13 +5968,12 @@ const ShiftsView = ({ activeShift, summary, history, sales, products }: ShiftsVi
           withBorder
           radius="lg"
           style={{
-            background: `linear-gradient(135deg, ${
-              totalDifferences === 0
-                ? "var(--mantine-color-gray-6), var(--mantine-color-gray-4)"
-                : totalDifferences > 0
+            background: `linear-gradient(135deg, ${totalDifferences === 0
+              ? "var(--mantine-color-gray-6), var(--mantine-color-gray-4)"
+              : totalDifferences > 0
                 ? "var(--mantine-color-green-6), var(--mantine-color-green-4)"
                 : "var(--mantine-color-orange-6), var(--mantine-color-orange-4)"
-            })`
+              })`
           }}
         >
           <Stack gap="xs">

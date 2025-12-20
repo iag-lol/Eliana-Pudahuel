@@ -17,12 +17,15 @@ export interface CartLine {
   quantity: number;
 }
 
+export type PaymentSchedule = "immediate" | "biweekly" | "monthly";
+
 export interface Client {
   id: string;
   name: string;
   authorized: boolean;
   balance: number;
   limit: number;
+  payment_schedule?: PaymentSchedule;
   updated_at?: string;
   history?: ClientMovement[];
 }
