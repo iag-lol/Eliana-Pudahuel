@@ -149,21 +149,16 @@ export const generateClientReport = ({
     yPos += 50;
 
     // Summary section
-    const totalFiado = movements
-        .filter(m => m.type === "fiado")
-        .reduce((sum, m) => sum + m.amount, 0);
-    const totalAbonos = movements
-        .filter(m => m.type === "abono" || m.type === "pago-total")
-        .reduce((sum, m) => sum + m.amount, 0);
+    const totalFiado = movements.reduce((sum, m) => sum + m.amount, 0);
 
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text("Resumen del Período", 14, yPos);
+    doc.text("Resumen", 14, yPos);
 
     yPos += 10;
 
-    // Summary boxes
-    const boxWidth = (pageWidth - 42) / 3;
+    // Summary boxes - 2 columns
+    const boxWidth = (pageWidth - 35) / 2;
 
     // Consumos box
     doc.setFillColor(254, 226, 226);
@@ -171,32 +166,21 @@ export const generateClientReport = ({
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(127, 29, 29);
-    doc.text("Total Consumos", 14 + boxWidth / 2, yPos + 3, { align: "center" });
-    doc.setFontSize(12);
+    doc.text("Total Consumos (Período)", 14 + boxWidth / 2, yPos + 3, { align: "center" });
+    doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
     doc.text(formatCurrency(totalFiado), 14 + boxWidth / 2, yPos + 14, { align: "center" });
 
-    // Abonos box
-    doc.setFillColor(220, 252, 231);
+    // Saldo Pendiente box
+    doc.setFillColor(219, 234, 254);
     doc.roundedRect(14 + boxWidth + 7, yPos - 5, boxWidth, 25, 3, 3, "F");
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(22, 101, 52);
-    doc.text("Total Abonos", 14 + boxWidth + 7 + boxWidth / 2, yPos + 3, { align: "center" });
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text(formatCurrency(totalAbonos), 14 + boxWidth + 7 + boxWidth / 2, yPos + 14, { align: "center" });
-
-    // Saldo box
-    doc.setFillColor(219, 234, 254);
-    doc.roundedRect(14 + (boxWidth + 7) * 2, yPos - 5, boxWidth, 25, 3, 3, "F");
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
     doc.setTextColor(30, 64, 175);
-    doc.text("Saldo Pendiente", 14 + (boxWidth + 7) * 2 + boxWidth / 2, yPos + 3, { align: "center" });
-    doc.setFontSize(12);
+    doc.text("Saldo Pendiente Total", 14 + boxWidth + 7 + boxWidth / 2, yPos + 3, { align: "center" });
+    doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text(formatCurrency(client.balance), 14 + (boxWidth + 7) * 2 + boxWidth / 2, yPos + 14, { align: "center" });
+    doc.text(formatCurrency(client.balance), 14 + boxWidth + 7 + boxWidth / 2, yPos + 14, { align: "center" });
 
     yPos += 35;
 
@@ -215,15 +199,12 @@ export const generateClientReport = ({
     } else {
         const tableData = movements.map(m => [
             formatDateTime(m.created_at),
-            getMovementTypeLabel(m.type),
-            m.description || "-",
-            m.type === "fiado" ? formatCurrency(m.amount) : "-",
-            m.type !== "fiado" ? formatCurrency(m.amount) : "-",
-            formatCurrency(m.balance_after)
+            m.description || "Compra a crédito",
+            formatCurrency(m.amount)
         ]);
 
         doc.autoTable({
-            head: [["Fecha", "Tipo", "Descripción", "Cargo", "Abono", "Saldo"]],
+            head: [["Fecha y Hora", "Descripción", "Monto"]],
             body: tableData,
             startY: yPos,
             theme: "striped",
@@ -231,18 +212,15 @@ export const generateClientReport = ({
                 fillColor: [59, 130, 246],
                 textColor: 255,
                 fontStyle: "bold",
-                fontSize: 9
+                fontSize: 10
             },
             bodyStyles: {
-                fontSize: 8
+                fontSize: 9
             },
             columnStyles: {
-                0: { cellWidth: 35 },
-                1: { cellWidth: 30 },
-                2: { cellWidth: "auto" },
-                3: { cellWidth: 25, halign: "right" },
-                4: { cellWidth: 25, halign: "right" },
-                5: { cellWidth: 25, halign: "right" }
+                0: { cellWidth: 45 },
+                1: { cellWidth: "auto" },
+                2: { cellWidth: 35, halign: "right" }
             },
             margin: { left: 14, right: 14 },
             alternateRowStyles: {

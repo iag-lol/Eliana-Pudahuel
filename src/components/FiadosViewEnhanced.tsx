@@ -582,6 +582,9 @@ export const FiadosViewEnhanced = ({
                                     <Text fw={600}>Filtrar por período</Text>
                                 </Group>
                                 <Group gap="xs" wrap="wrap">
+                                    <Button size="xs" variant="filled" color="blue" onClick={() => { setDateFrom(null); setDateTo(null); }}>
+                                        Todo Pendiente
+                                    </Button>
                                     <Button size="xs" variant="light" color="violet" onClick={() => handleQuickDateRange("biweekly")}>
                                         Esta Quincena
                                     </Button>
@@ -590,9 +593,6 @@ export const FiadosViewEnhanced = ({
                                     </Button>
                                     <Button size="xs" variant="light" color="gray" onClick={() => handleQuickDateRange("lastMonth")}>
                                         Mes Anterior
-                                    </Button>
-                                    <Button size="xs" variant="subtle" color="red" onClick={() => { setDateFrom(null); setDateTo(null); }}>
-                                        Limpiar
                                     </Button>
                                 </Group>
                                 <Grid gutter="sm">
@@ -619,23 +619,19 @@ export const FiadosViewEnhanced = ({
                         </Card>
 
                         {/* Period Summary */}
-                        <SimpleGrid cols={3}>
+                        <SimpleGrid cols={2}>
                             <Paper withBorder radius="md" p="sm" style={{ background: "rgba(254, 226, 226, 0.5)" }}>
                                 <Stack gap={2} align="center">
-                                    <Text size="xs" c="dimmed">Consumos</Text>
+                                    <Text size="xs" c="dimmed">{dateFrom || dateTo ? "Consumos del Período" : "Total Consumos"}</Text>
                                     <Text fw={700} c="red.7">{formatCurrency(periodSummary.totalFiado)}</Text>
-                                </Stack>
-                            </Paper>
-                            <Paper withBorder radius="md" p="sm" style={{ background: "rgba(220, 252, 231, 0.5)" }}>
-                                <Stack gap={2} align="center">
-                                    <Text size="xs" c="dimmed">Abonos</Text>
-                                    <Text fw={700} c="teal.7">{formatCurrency(periodSummary.totalAbonos)}</Text>
+                                    <Text size="xs" c="dimmed">{periodSummary.count} compras</Text>
                                 </Stack>
                             </Paper>
                             <Paper withBorder radius="md" p="sm" style={{ background: "rgba(219, 234, 254, 0.5)" }}>
                                 <Stack gap={2} align="center">
-                                    <Text size="xs" c="dimmed">Movimientos</Text>
-                                    <Text fw={700} c="indigo.7">{periodSummary.count}</Text>
+                                    <Text size="xs" c="dimmed">Saldo Pendiente Total</Text>
+                                    <Text fw={700} fz="lg" c="indigo.7">{formatCurrency(selectedClient?.balance ?? 0)}</Text>
+                                    <Text size="xs" c="dimmed">Deuda actual</Text>
                                 </Stack>
                             </Paper>
                         </SimpleGrid>
