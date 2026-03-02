@@ -99,8 +99,8 @@ export function QuickStockModal({
     setSearch("");
   };
 
-  const handleUpdateItemQuantity = (productId: string, value: number | "") => {
-    if (value === "" || value === null) return;
+  const handleUpdateItemQuantity = (productId: string, value: number | string) => {
+    if (value === "") return;
     const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(parsed)) return;
 
