@@ -107,6 +107,7 @@ import {
   ReportFilters,
   Sale,
   SaleItem,
+  StockRequest,
   Shift,
   ShiftExpense,
   ShiftSummary,
@@ -220,6 +221,8 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 };
 
 const PAYMENT_ORDER: PaymentMethod[] = ["cash", "card", "transfer", "fiado", "staff"];
+
+const STOCK_REQUESTS_STORAGE_KEY = "pudahuel_stock_requests";
 
 const EXPENSE_LABELS: Record<ExpenseType, string> = {
   sueldo: "Sueldo",
@@ -2294,6 +2297,13 @@ const AppContent = () => {
   const [selectedProductForEdit, setSelectedProductForEdit] = useState<Product | null>(null);
   const [deleteProductModalOpened, deleteProductModalHandlers] = useDisclosure(false);
   const [selectedProductForDelete, setSelectedProductForDelete] = useState<Product | null>(null);
+  const [stockRequests, setStockRequests] = useState<StockRequest[]>(() => {
+    if (typeof window === "undefined") return [];
+    return safeParseJson<StockRequest[]>(
+      window.localStorage.getItem(STOCK_REQUESTS_STORAGE_KEY),
+      []
+    );
+  });
 
   const [reportFilters, setReportFilters] = useState<ReportFilters>({ range: "today" });
   const [now, setNow] = useState(dayjs());
@@ -2302,6 +2312,11 @@ const AppContent = () => {
     const interval = window.setInterval(() => setNow(dayjs()), 60000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STOCK_REQUESTS_STORAGE_KEY, JSON.stringify(stockRequests));
+  }, [stockRequests]);
 
   useEffect(() => {
     if (userRole && pendingTab) {
@@ -2386,6 +2401,118 @@ const AppContent = () => {
   );
 
   const productMap = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
+  const handleSubmitStockRequests = (requests: StockRequestDraft[]) => {
+    if (requests.length === 0) return;
+
+    const requestedBy = activeShift?.seller ?? "Caja";
+    const requestedAt = new Date().toISOString();
+
+    setStockRequests((prev) => {
+      const updated = [...prev];
+
+      requests.forEach((request) => {
+        const existingIndex = updated.findIndex((item) => item.productId === request.productId);
+        if (existingIndex >= 0) {
+          const existing = updated[existingIndex];
+          updated[existingIndex] = {
+            ...existing,
+            requestedQty: existing.requestedQty + request.quantity,
+            finalQty: existing.finalQty + request.quantity,
+            requestedAt,
+            requestedBy
+          };
+          return;
+        }
+
+        updated.push({
+          id: generateId(),
+          productId: request.productId,
+          productName: request.productName,
+          requestedQty: request.quantity,
+          finalQty: request.quantity,
+          requestedAt,
+          requestedBy
+        });
+      });
+
+      return updated;
+    });
+
+    notifications.show({
+      title: "Solicitud enviada",
+      message: `Se enviaron ${requests.length} productos para aprobación en inventario.`,
+      color: "teal"
+    });
+  };
+
+  const handleUpdateStockRequestQty = (requestId: string, quantity: number) => {
+    const safeQuantity = Math.max(1, Math.round(quantity));
+    setStockRequests((prev) =>
+      prev.map((request) =>
+        request.id === requestId
+          ? { ...request, finalQty: safeQuantity }
+          : request
+      )
+    );
+  };
+
+  const handleApproveStockRequest = async (requestId: string) => {
+    const request = stockRequests.find((item) => item.id === requestId);
+    if (!request) return;
+
+    const product = productMap.get(request.productId);
+    if (!product) {
+      notifications.show({
+        title: "Producto no disponible",
+        message: "El producto ya no existe en inventario.",
+        color: "red"
+      });
+      setStockRequests((prev) => prev.filter((item) => item.id !== requestId));
+      return;
+    }
+
+    const finalQty = Math.max(1, Math.round(request.finalQty || request.requestedQty));
+    const newStock = (product.stock ?? 0) + finalQty;
+
+    const { error } = await supabase
+      .from("pudahuel_products")
+      .update({
+        stock: newStock,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", request.productId);
+
+    if (error) {
+      notifications.show({
+        title: "Error al autorizar",
+        message: "No se pudo actualizar el stock. Inténtalo de nuevo.",
+        color: "red"
+      });
+      return;
+    }
+
+    setStockRequests((prev) => prev.filter((item) => item.id !== requestId));
+    productQuery.refetch();
+
+    notifications.show({
+      title: "Stock autorizado",
+      message: `${request.productName}: +${finalQty} unidades.`,
+      color: "teal"
+    });
+  };
+
+  const handleDenyStockRequest = (requestId: string) => {
+    const request = stockRequests.find((item) => item.id === requestId);
+    setStockRequests((prev) => prev.filter((item) => item.id !== requestId));
+
+    if (request) {
+      notifications.show({
+        title: "Solicitud denegada",
+        message: `${request.productName} fue rechazada.`,
+        color: "orange"
+      });
+    }
+  };
   const cartDetailed = useMemo(() => {
     return cart
       .map((line) => {
@@ -4187,7 +4314,7 @@ const AppContent = () => {
                           <Group justify="space-between">
                             <Title order={4}>Carrito de venta</Title>
                             <Group gap="xs">
-                              <Tooltip label="Stock Rápido">
+                              <Tooltip label="Solicitar stock">
                                 <ActionIcon
                                   variant="light"
                                   color="orange"
@@ -4292,7 +4419,7 @@ const AppContent = () => {
                             <Stack gap="xs">
                               <Text fw={600} size="sm">Método de pago</Text>
                               <Group gap="xs" wrap="wrap">
-                                {PAYMENT_OPTIONS.map((option) => (
+                                {PAYMENT_OPTIONS.filter((option) => option.id !== "staff").map((option) => (
                                   <Button
                                     key={option.id}
                                     variant={selectedPayment === option.id ? "filled" : "light"}
@@ -4453,6 +4580,10 @@ const AppContent = () => {
                   deleteProductModalHandlers.open();
                 }}
                 onQuickStock={() => setQuickStockModalOpen(true)}
+                stockRequests={stockRequests}
+                onApproveStockRequest={handleApproveStockRequest}
+                onDenyStockRequest={handleDenyStockRequest}
+                onUpdateStockRequestQty={handleUpdateStockRequestQty}
               />
             )}
             {activeTab === "fiados" && (
@@ -4681,7 +4812,7 @@ const AppContent = () => {
         opened={quickStockModalOpen}
         onClose={() => setQuickStockModalOpen(false)}
         products={products}
-        onStockUpdate={() => productQuery.refetch()}
+        onSubmitRequests={handleSubmitStockRequests}
       />
 
       <EditProductModal
@@ -4729,6 +4860,12 @@ type ProductInput = {
   minStock: number;
 };
 
+type StockRequestDraft = {
+  productId: string;
+  productName: string;
+  quantity: number;
+};
+
 // ================== INVENTORY COMPONENTS ==================
 
 interface InventoryViewProps {
@@ -4745,6 +4882,10 @@ interface InventoryViewProps {
   onEditProduct: (product: Product) => void;
   onDeleteProduct: (product: Product) => void;
   onQuickStock: () => void;
+  stockRequests: StockRequest[];
+  onApproveStockRequest: (requestId: string) => void;
+  onDenyStockRequest: (requestId: string) => void;
+  onUpdateStockRequestQty: (requestId: string, quantity: number) => void;
 }
 
 const InventoryView = ({
@@ -4760,7 +4901,11 @@ const InventoryView = ({
   onAddStock,
   onEditProduct,
   onDeleteProduct,
-  onQuickStock
+  onQuickStock,
+  stockRequests,
+  onApproveStockRequest,
+  onDenyStockRequest,
+  onUpdateStockRequestQty
 }: InventoryViewProps) => {
   const categories = useMemo(() => Array.from(new Set(products.map((p) => p.category))).sort(), [products]);
 
@@ -4797,6 +4942,14 @@ const InventoryView = ({
   const totalValue = useMemo(() => products.reduce((acc, p) => acc + p.price * p.stock, 0), [products]);
   const lowStockCount = useMemo(() => products.filter((p) => p.stock <= p.minStock && p.stock > 0).length, [products]);
   const outStockCount = useMemo(() => products.filter((p) => p.stock === 0).length, [products]);
+  const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
+  const sortedStockRequests = useMemo(
+    () =>
+      [...stockRequests].sort(
+        (a, b) => dayjs(b.requestedAt).valueOf() - dayjs(a.requestedAt).valueOf()
+      ),
+    [stockRequests]
+  );
 
   return (
     <Stack gap="xl">
@@ -4965,6 +5118,93 @@ const InventoryView = ({
           </Grid>
         </Stack>
       </Card >
+
+      {sortedStockRequests.length > 0 && (
+        <Card withBorder radius="lg">
+          <Stack gap="md">
+            <Group justify="space-between">
+              <Text fw={700}>Solicitudes de stock</Text>
+              <Badge color="orange" variant="light">
+                {sortedStockRequests.length}
+              </Badge>
+            </Group>
+            <ScrollArea h={260}>
+              <Table highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Producto</Table.Th>
+                    <Table.Th style={{ width: 110 }}>Solicitado</Table.Th>
+                    <Table.Th style={{ width: 140 }}>Final</Table.Th>
+                    <Table.Th>Solicitante</Table.Th>
+                    <Table.Th>Hora</Table.Th>
+                    <Table.Th style={{ width: 180 }}>Acciones</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {sortedStockRequests.map((request) => {
+                    const product = productById.get(request.productId);
+                    return (
+                      <Table.Tr key={request.id}>
+                        <Table.Td>
+                          <Stack gap={2}>
+                            <Text fw={600}>{request.productName}</Text>
+                            <Text size="xs" c="dimmed">
+                              {product?.barcode ? `SKU: ${product.barcode}` : "Sin SKU"}
+                            </Text>
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text fw={600}>{request.requestedQty}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <NumberInput
+                            value={request.finalQty}
+                            min={1}
+                            onChange={(value) => {
+                              if (value === "" || value === null) return;
+                              const parsed = typeof value === "number" ? value : Number(value);
+                              if (Number.isFinite(parsed)) {
+                                onUpdateStockRequestQty(request.id, parsed);
+                              }
+                            }}
+                            style={{ maxWidth: 120 }}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{request.requestedBy || "Caja"}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{formatDateTime(request.requestedAt)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap="xs">
+                            <Button
+                              size="xs"
+                              color="teal"
+                              onClick={() => onApproveStockRequest(request.id)}
+                              disabled={request.finalQty <= 0}
+                            >
+                              Autorizar
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="light"
+                              color="red"
+                              onClick={() => onDenyStockRequest(request.id)}
+                            >
+                              Denegar
+                            </Button>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
+          </Stack>
+        </Card>
+      )}
 
       {/* Vista de tarjetas de productos */}
       {

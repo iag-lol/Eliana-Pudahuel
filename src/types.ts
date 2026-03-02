@@ -12,6 +12,16 @@ export interface Product {
   updated_at?: string;
 }
 
+export interface StockRequest {
+  id: string;
+  productId: string;
+  productName: string;
+  requestedQty: number;
+  finalQty: number;
+  requestedAt: string;
+  requestedBy?: string | null;
+}
+
 export interface CartLine {
   productId: string;
   quantity: number;
