@@ -4466,26 +4466,6 @@ const AppContent = () => {
                                   value={selectedFiadoClient}
                                   onChange={(value) => setSelectedFiadoClient(value)}
                                 />
-                                {selectedFiadoClientData && (
-                                  <Paper withBorder p="sm" radius="md">
-                                    <Stack gap={4}>
-                                      <Group justify="space-between">
-                                        <Text size="sm" c="dimmed">Deuda actual</Text>
-                                        <Text size="sm" fw={600}>{formatCurrency(selectedFiadoClientData.balance)}</Text>
-                                      </Group>
-                                      <Group justify="space-between">
-                                        <Text size="sm" c="dimmed">Compra actual</Text>
-                                        <Text size="sm" fw={600}>{formatCurrency(cartTotals.total)}</Text>
-                                      </Group>
-                                      <Group justify="space-between">
-                                        <Text size="sm" fw={700}>Deuda proyectada</Text>
-                                        <Text size="sm" fw={700} c="red.7">
-                                          {formatCurrency(selectedFiadoClientData.balance + cartTotals.total)}
-                                        </Text>
-                                      </Group>
-                                    </Stack>
-                                  </Paper>
-                                )}
                               </>
                             )}
                             {selectedPayment === "cash" && (
