@@ -95,7 +95,7 @@ import {
   Waypoints,
   X
 } from "lucide-react";
-import { supabase } from "./lib/supabaseClient";
+import { supabase, SUPABASE_PROJECT_REF } from "./lib/supabaseClient";
 import {
   CartLine,
   Client,
@@ -2360,6 +2360,10 @@ const AppContent = () => {
   }, []);
 
   useEffect(() => {
+    console.info(`[Supabase] Proyecto activo: ${SUPABASE_PROJECT_REF}`);
+  }, []);
+
+  useEffect(() => {
     if (userRole && pendingTab) {
       setActiveTab(pendingTab);
       setPendingTab(null);
@@ -2393,7 +2397,9 @@ const AppContent = () => {
   const stockRequestsQuery = useQuery({
     queryKey: ["stock-requests"],
     queryFn: fetchStockRequests,
-    initialData: [] as StockRequest[]
+    initialData: [] as StockRequest[],
+    refetchInterval: 3000,
+    refetchIntervalInBackground: true
   });
 
   const products = productQuery.data ?? [];
@@ -2422,7 +2428,11 @@ const AppContent = () => {
           void queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR") {
+          console.error("Realtime de solicitudes de stock desconectado. Se usará refresco automático.");
+        }
+      });
 
     return () => {
       void supabase.removeChannel(channel);
@@ -5140,6 +5150,9 @@ const InventoryView = ({
             )}
             <Text size="sm" c="dimmed">
               No se están mostrando datos inventados.
+            </Text>
+            <Text size="xs" c="dimmed">
+              Proyecto Supabase activo: {SUPABASE_PROJECT_REF}
             </Text>
           </Stack>
         </Paper>
