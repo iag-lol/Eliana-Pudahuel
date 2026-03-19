@@ -113,7 +113,7 @@ import {
   ShiftSummary,
   ShiftType
 } from "./types";
-import { FALLBACK_CLIENTS, FALLBACK_PRODUCTS, FALLBACK_SALES, FALLBACK_SHIFTS } from "./data/fallback";
+import { FALLBACK_CLIENTS, FALLBACK_SHIFTS } from "./data/fallback";
 import { formatCurrency, formatDate, formatDateTime, formatTime } from "./utils/format";
 import { applyInternalDiscount } from "./utils/internalDiscount";
 import { generateClientReport, generateSummaryReport } from "./utils/pdfGenerator";
@@ -222,8 +222,6 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 
 const PAYMENT_ORDER: PaymentMethod[] = ["cash", "card", "transfer", "fiado", "staff"];
 
-const STOCK_REQUESTS_STORAGE_KEY = "pudahuel_stock_requests";
-
 const EXPENSE_LABELS: Record<ExpenseType, string> = {
   sueldo: "Sueldo",
   flete: "Flete",
@@ -299,7 +297,7 @@ const mapProductRow = (row: any): Product => ({
   category: row.category,
   price: row.price ?? 0,
   stock: row.stock ?? 0,
-  minStock: row.min_stock ?? 5,
+  minStock: row.min_stock ?? row.stock_min ?? 5,
   created_at: row.created_at,
   updated_at: row.updated_at
 });
@@ -311,6 +309,28 @@ const toNumber = (value: unknown): number => {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+};
+
+const normalizeSaleItems = (value: unknown): SaleItem[] => {
+  const parsed = safeParseJson<any[]>(value, []);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((item, index) => {
+      const productIdRaw = item?.productId ?? item?.product_id ?? "";
+      const productId = productIdRaw?.toString?.() ?? String(productIdRaw ?? "");
+      const itemIdRaw = item?.id ?? `${productId}-${index}`;
+      const itemId = itemIdRaw?.toString?.() ?? String(itemIdRaw ?? `${index}`);
+
+      return {
+        id: itemId,
+        productId,
+        name: typeof item?.name === "string" ? item.name : "Producto",
+        price: toNumber(item?.price),
+        quantity: Math.max(0, Math.round(toNumber(item?.quantity)))
+      };
+    })
+    .filter((item) => Boolean(item.productId) && item.quantity > 0);
 };
 
 const mapClientRow = (row: any): Client => {
@@ -347,7 +367,7 @@ const mapSaleRow = (row: any): Sale => ({
   shiftId: row.shift_id?.toString?.() ?? (row.shift_id ?? null),
   seller: row.seller,
   created_at: row.created_at,
-  items: safeParseJson<SaleItem[]>(row.items, []),
+  items: normalizeSaleItems(row.items),
   notes: safeParseJson<Record<string, unknown> | null>(row.notes, null)
 });
 
@@ -368,20 +388,33 @@ const mapShiftRow = (row: any): Shift => ({
   total_expenses: row.total_expenses ?? null
 });
 
+const mapStockRequestRow = (row: any): StockRequest => ({
+  id: row.id?.toString?.() ?? String(row.id),
+  productId: row.product_id?.toString?.() ?? String(row.product_id),
+  productName: row.product_name ?? "Producto",
+  requestedQty: row.requested_qty ?? 0,
+  finalQty: row.final_qty ?? row.requested_qty ?? 0,
+  requestedAt: row.requested_at ?? row.created_at ?? new Date().toISOString(),
+  requestedBy: row.requested_by ?? "Caja"
+});
+
 const generateId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 async function fetchProducts(): Promise<Product[]> {
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from("pudahuel_products")
     .select("*")
     .order("name", { ascending: true });
 
   if (error) {
-    console.warn("Fallo al cargar productos, usando datos locales", error.message);
-    return FALLBACK_PRODUCTS;
+    if (status === 540 || error.message.toLowerCase().includes("project paused")) {
+      throw new Error("Proyecto Supabase en pausa. Debes reactivarlo para leer inventario real.");
+    }
+    console.error("Fallo al cargar productos", error.message);
+    throw new Error(`No se pudo leer inventario (pudahuel_products): ${error.message}`);
   }
 
   return (data ?? []).map(mapProductRow);
@@ -444,14 +477,17 @@ async function fetchClients(): Promise<Client[]> {
 }
 
 async function fetchSales(): Promise<Sale[]> {
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from("pudahuel_sales")
     .select("*")
     .order("created_at", { ascending: false });
 
   if (error) {
-    console.warn("Fallo al cargar ventas, usando datos locales", error.message);
-    return FALLBACK_SALES;
+    if (status === 540 || error.message.toLowerCase().includes("project paused")) {
+      throw new Error("Proyecto Supabase en pausa. Debes reactivarlo para leer ventas reales.");
+    }
+    console.error("Fallo al cargar ventas", error.message);
+    throw new Error(`No se pudo leer ventas (pudahuel_sales): ${error.message}`);
   }
 
   return (data ?? []).map(mapSaleRow);
@@ -498,6 +534,23 @@ async function fetchExpenses(shiftId?: string): Promise<ShiftExpense[]> {
     created_at: row.created_at,
     paid_from_cash: row.paid_from_cash ?? false
   }));
+}
+
+async function fetchStockRequests(): Promise<StockRequest[]> {
+  const { data, error } = await supabase
+    .from("pudahuel_stock_requests")
+    .select("*")
+    .order("requested_at", { ascending: false });
+
+  if (error) {
+    const errorMessage = error.message.toLowerCase();
+    if (errorMessage.includes("does not exist") || errorMessage.includes("relation")) {
+      throw new Error("Falta la tabla pudahuel_stock_requests. Ejecuta el SQL de stock requests en Supabase.");
+    }
+    throw new Error(`No se pudieron leer las solicitudes de stock: ${error.message}`);
+  }
+
+  return (data ?? []).map(mapStockRequestRow);
 }
 
 const computeShiftSummary = (sales: Sale[], shiftId: string | null | undefined): ShiftSummary => {
@@ -2297,13 +2350,6 @@ const AppContent = () => {
   const [selectedProductForEdit, setSelectedProductForEdit] = useState<Product | null>(null);
   const [deleteProductModalOpened, deleteProductModalHandlers] = useDisclosure(false);
   const [selectedProductForDelete, setSelectedProductForDelete] = useState<Product | null>(null);
-  const [stockRequests, setStockRequests] = useState<StockRequest[]>(() => {
-    if (typeof window === "undefined") return [];
-    return safeParseJson<StockRequest[]>(
-      window.localStorage.getItem(STOCK_REQUESTS_STORAGE_KEY),
-      []
-    );
-  });
 
   const [reportFilters, setReportFilters] = useState<ReportFilters>({ range: "today" });
   const [now, setNow] = useState(dayjs());
@@ -2312,11 +2358,6 @@ const AppContent = () => {
     const interval = window.setInterval(() => setNow(dayjs()), 60000);
     return () => window.clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STOCK_REQUESTS_STORAGE_KEY, JSON.stringify(stockRequests));
-  }, [stockRequests]);
 
   useEffect(() => {
     if (userRole && pendingTab) {
@@ -2328,7 +2369,7 @@ const AppContent = () => {
   const productQuery = useQuery({
     queryKey: ["products"],
     queryFn: fetchProducts,
-    initialData: FALLBACK_PRODUCTS
+    initialData: [] as Product[]
   });
 
   const clientsQuery = useQuery({
@@ -2340,7 +2381,7 @@ const AppContent = () => {
   const salesQuery = useQuery({
     queryKey: ["sales"],
     queryFn: fetchSales,
-    initialData: FALLBACK_SALES
+    initialData: [] as Sale[]
   });
 
   const shiftsQuery = useQuery({
@@ -2349,10 +2390,20 @@ const AppContent = () => {
     initialData: FALLBACK_SHIFTS
   });
 
+  const stockRequestsQuery = useQuery({
+    queryKey: ["stock-requests"],
+    queryFn: fetchStockRequests,
+    initialData: [] as StockRequest[]
+  });
+
   const products = productQuery.data ?? [];
   const clients = clientsQuery.data ?? [];
   const sales = salesQuery.data ?? [];
   const shifts = shiftsQuery.data ?? [];
+  const stockRequests = stockRequestsQuery.data ?? [];
+  const inventoryLoadError = productQuery.error instanceof Error ? productQuery.error.message : null;
+  const salesLoadError = salesQuery.error instanceof Error ? salesQuery.error.message : null;
+  const stockRequestsLoadError = stockRequestsQuery.error instanceof Error ? stockRequestsQuery.error.message : null;
   const authorizedFiadoClients = useMemo(() => clients.filter((client) => client.authorized), [clients]);
   const selectedFiadoClientData = useMemo(
     () => clients.find((client) => client.id === selectedFiadoClient) ?? null,
@@ -2360,6 +2411,23 @@ const AppContent = () => {
   );
   const activeShift = useMemo(() => shifts.find((shift) => shift.status === "open"), [shifts]);
   const shiftSummary = useMemo(() => computeShiftSummary(sales, activeShift?.id ?? null), [sales, activeShift]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("pudahuel-stock-requests")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pudahuel_stock_requests" },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   useEffect(() => {
     if (selectedPayment === "fiado") {
@@ -2401,43 +2469,32 @@ const AppContent = () => {
   );
 
   const productMap = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
-  const handleSubmitStockRequests = (requests: StockRequestDraft[]) => {
+  const handleSubmitStockRequests = async (requests: StockRequestDraft[]) => {
     if (requests.length === 0) return;
 
     const requestedBy = activeShift?.seller ?? "Caja";
     const requestedAt = new Date().toISOString();
+    const payload = requests.map((request) => ({
+      product_id: request.productId,
+      product_name: request.productName,
+      requested_qty: Math.max(1, Math.round(request.quantity)),
+      final_qty: Math.max(1, Math.round(request.quantity)),
+      requested_at: requestedAt,
+      requested_by: requestedBy
+    }));
 
-    setStockRequests((prev) => {
-      const updated = [...prev];
+    const { error } = await supabase.from("pudahuel_stock_requests").insert(payload);
 
-      requests.forEach((request) => {
-        const existingIndex = updated.findIndex((item) => item.productId === request.productId);
-        if (existingIndex >= 0) {
-          const existing = updated[existingIndex];
-          updated[existingIndex] = {
-            ...existing,
-            requestedQty: existing.requestedQty + request.quantity,
-            finalQty: existing.finalQty + request.quantity,
-            requestedAt,
-            requestedBy
-          };
-          return;
-        }
-
-        updated.push({
-          id: generateId(),
-          productId: request.productId,
-          productName: request.productName,
-          requestedQty: request.quantity,
-          finalQty: request.quantity,
-          requestedAt,
-          requestedBy
-        });
+    if (error) {
+      notifications.show({
+        title: "No se pudo enviar la solicitud",
+        message: error.message,
+        color: "red"
       });
+      throw error;
+    }
 
-      return updated;
-    });
-
+    await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
     notifications.show({
       title: "Solicitud enviada",
       message: `Se enviaron ${requests.length} productos para aprobación en inventario.`,
@@ -2445,15 +2502,23 @@ const AppContent = () => {
     });
   };
 
-  const handleUpdateStockRequestQty = (requestId: string, quantity: number) => {
+  const handleUpdateStockRequestQty = async (requestId: string, quantity: number) => {
     const safeQuantity = Math.max(1, Math.round(quantity));
-    setStockRequests((prev) =>
-      prev.map((request) =>
-        request.id === requestId
-          ? { ...request, finalQty: safeQuantity }
-          : request
-      )
-    );
+    const { error } = await supabase
+      .from("pudahuel_stock_requests")
+      .update({ final_qty: safeQuantity })
+      .eq("id", requestId);
+
+    if (error) {
+      notifications.show({
+        title: "No se pudo actualizar la cantidad",
+        message: error.message,
+        color: "red"
+      });
+      return;
+    }
+
+    await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
   };
 
   const handleApproveStockRequest = async (requestId: string) => {
@@ -2467,7 +2532,8 @@ const AppContent = () => {
         message: "El producto ya no existe en inventario.",
         color: "red"
       });
-      setStockRequests((prev) => prev.filter((item) => item.id !== requestId));
+      await supabase.from("pudahuel_stock_requests").delete().eq("id", requestId);
+      await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
       return;
     }
 
@@ -2491,8 +2557,23 @@ const AppContent = () => {
       return;
     }
 
-    setStockRequests((prev) => prev.filter((item) => item.id !== requestId));
-    productQuery.refetch();
+    const { error: deleteError } = await supabase
+      .from("pudahuel_stock_requests")
+      .delete()
+      .eq("id", requestId);
+
+    if (deleteError) {
+      notifications.show({
+        title: "Stock actualizado, pero falta limpiar la solicitud",
+        message: deleteError.message,
+        color: "orange"
+      });
+    }
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["products"] }),
+      queryClient.invalidateQueries({ queryKey: ["stock-requests"] })
+    ]);
 
     notifications.show({
       title: "Stock autorizado",
@@ -2501,9 +2582,23 @@ const AppContent = () => {
     });
   };
 
-  const handleDenyStockRequest = (requestId: string) => {
+  const handleDenyStockRequest = async (requestId: string) => {
     const request = stockRequests.find((item) => item.id === requestId);
-    setStockRequests((prev) => prev.filter((item) => item.id !== requestId));
+    const { error } = await supabase
+      .from("pudahuel_stock_requests")
+      .delete()
+      .eq("id", requestId);
+
+    if (error) {
+      notifications.show({
+        title: "No se pudo denegar la solicitud",
+        message: error.message,
+        color: "red"
+      });
+      return;
+    }
+
+    await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
 
     if (request) {
       notifications.show({
@@ -3313,7 +3408,7 @@ const AppContent = () => {
       barcode: payload.barcode,
       price: payload.price,
       stock: payload.stock,
-      min_stock: payload.minStock
+      stock_min: payload.minStock
     });
 
     if (error) {
@@ -3373,7 +3468,7 @@ const AppContent = () => {
     if (updates.barcode !== undefined) payload.barcode = updates.barcode;
     if (updates.price !== undefined) payload.price = updates.price;
     if (updates.stock !== undefined) payload.stock = updates.stock;
-    if (updates.minStock !== undefined) payload.min_stock = updates.minStock;
+    if (updates.minStock !== undefined) payload.stock_min = updates.minStock;
 
     const { error } = await supabase
       .from("pudahuel_products")
@@ -4536,13 +4631,19 @@ const AppContent = () => {
             {activeTab === "inventory" && (
               <InventoryView
                 products={products}
+                sales={sales}
+                inventoryLoadError={inventoryLoadError}
+                salesLoadError={salesLoadError}
                 search={inventorySearch}
                 onSearchChange={setInventorySearch}
                 categoryFilter={inventoryCategoryFilter}
                 onCategoryFilterChange={setInventoryCategoryFilter}
                 stockFilter={inventoryStockFilter}
                 onStockFilterChange={setInventoryStockFilter}
-                onRefresh={() => productQuery.refetch()}
+                stockRequestsLoadError={stockRequestsLoadError}
+                onRefresh={() => {
+                  void Promise.all([productQuery.refetch(), stockRequestsQuery.refetch()]);
+                }}
                 onNewProduct={() => {
                   setSelectedProductForEdit(null);
                   editProductModalHandlers.open();
@@ -4846,10 +4947,26 @@ type StockRequestDraft = {
   quantity: number;
 };
 
+type ProductSaleReportRow = {
+  saleId: string;
+  ticket: string;
+  createdAt: string;
+  seller: string;
+  paymentLabel: string;
+  productName: string;
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+};
+
 // ================== INVENTORY COMPONENTS ==================
 
 interface InventoryViewProps {
   products: Product[];
+  sales: Sale[];
+  inventoryLoadError: string | null;
+  salesLoadError: string | null;
+  stockRequestsLoadError: string | null;
   search: string;
   onSearchChange: (value: string) => void;
   categoryFilter: string | null;
@@ -4870,6 +4987,10 @@ interface InventoryViewProps {
 
 const InventoryView = ({
   products,
+  sales,
+  inventoryLoadError,
+  salesLoadError,
+  stockRequestsLoadError,
   search,
   onSearchChange,
   categoryFilter,
@@ -4930,9 +5051,100 @@ const InventoryView = ({
       ),
     [stockRequests]
   );
+  const [saleQueryOpened, setSaleQueryOpened] = useState(false);
+  const [saleSearch, setSaleSearch] = useState<string | null>(null);
+
+  const saleSearchData = useMemo(
+    () =>
+      products
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((product) => ({
+          value: product.id,
+          label: product.barcode ? `${product.name} • SKU: ${product.barcode}` : product.name
+        })),
+    [products]
+  );
+  const selectedSaleProduct = useMemo(
+    () => products.find((product) => product.id === saleSearch) ?? null,
+    [products, saleSearch]
+  );
+
+  const saleReportRows = useMemo<ProductSaleReportRow[]>(() => {
+    if (!saleSearch) return [];
+
+    const rows: ProductSaleReportRow[] = [];
+
+    sales
+      .filter((sale) => sale.type === "sale")
+      .forEach((sale) => {
+        getSaleItems(sale).forEach((item) => {
+          if (item.productId !== saleSearch) return;
+
+          rows.push({
+            saleId: sale.id,
+            ticket: sale.ticket,
+            createdAt: sale.created_at,
+            seller: sale.seller?.trim() ? sale.seller : "Sin vendedor",
+            paymentLabel: PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod.toUpperCase(),
+            productName: item.name,
+            unitPrice: item.price,
+            quantity: item.quantity,
+            subtotal: item.price * item.quantity
+          });
+        });
+      });
+
+    return rows.sort((a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf());
+  }, [saleSearch, sales]);
+
+  const saleReportSummary = useMemo(
+    () => ({
+      tickets: new Set(saleReportRows.map((row) => row.saleId)).size,
+      quantity: saleReportRows.reduce((acc, row) => acc + row.quantity, 0),
+      total: saleReportRows.reduce((acc, row) => acc + row.subtotal, 0)
+    }),
+    [saleReportRows]
+  );
+
+  const hasDataConnectionError = Boolean(inventoryLoadError || salesLoadError || stockRequestsLoadError);
 
   return (
     <Stack gap="xl">
+      {hasDataConnectionError && (
+        <Paper
+          withBorder
+          radius="lg"
+          p="md"
+          style={{ borderColor: "var(--mantine-color-red-4)", background: "var(--mantine-color-red-0)" }}
+        >
+          <Stack gap={4}>
+            <Group gap="xs">
+              <AlertTriangle size={16} color="var(--mantine-color-red-7)" />
+              <Text fw={700} c="red">Error de conexión con tablas reales</Text>
+            </Group>
+            {inventoryLoadError && (
+              <Text size="sm" c="red">
+                Inventario (`pudahuel_products`): {inventoryLoadError}
+              </Text>
+            )}
+            {salesLoadError && (
+              <Text size="sm" c="red">
+                Ventas (`pudahuel_sales`): {salesLoadError}
+              </Text>
+            )}
+            {stockRequestsLoadError && (
+              <Text size="sm" c="red">
+                Solicitudes (`pudahuel_stock_requests`): {stockRequestsLoadError}
+              </Text>
+            )}
+            <Text size="sm" c="dimmed">
+              No se están mostrando datos inventados.
+            </Text>
+          </Stack>
+        </Paper>
+      )}
+
       {/* KPI Cards */}
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="lg">
         <Card
@@ -5049,6 +5261,15 @@ const InventoryView = ({
                 onClick={onNewProduct}
               >
                 Nuevo Producto
+              </Button>
+
+              <Button
+                variant="light"
+                color="grape"
+                leftSection={<Search size={18} />}
+                onClick={() => setSaleQueryOpened(true)}
+              >
+                Consulta de venta
               </Button>
 
               <Button variant="light" color="indigo" leftSection={<RefreshCcw size={18} />} onClick={onRefresh}>
@@ -5328,6 +5549,138 @@ const InventoryView = ({
           </SimpleGrid>
         )
       }
+
+      <Modal
+        opened={saleQueryOpened}
+        onClose={() => setSaleQueryOpened(false)}
+        title="Consulta de venta por producto"
+        size="xl"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Selecciona un producto del inventario para ver ventas reales vinculadas a ese producto (fecha, vendedor, precio y cantidad).
+          </Text>
+
+          <Select
+            searchable
+            clearable
+            data={saleSearchData}
+            placeholder="Busca y selecciona un producto del inventario..."
+            value={saleSearch}
+            onChange={setSaleSearch}
+            leftSection={<Search size={16} />}
+            disabled={hasDataConnectionError || products.length === 0}
+          />
+
+          {hasDataConnectionError && (
+            <Paper withBorder radius="md" p="md" style={{ borderColor: "var(--mantine-color-red-4)" }}>
+              <Text size="sm" c="red" ta="center">
+                La consulta está deshabilitada hasta recuperar conexión real con inventario y ventas.
+              </Text>
+            </Paper>
+          )}
+
+          {!hasDataConnectionError && products.length === 0 && (
+            <Paper withBorder radius="md" p="md">
+              <Text size="sm" c="dimmed" ta="center">
+                No hay productos reales disponibles en `pudahuel_products`.
+              </Text>
+            </Paper>
+          )}
+
+          {selectedSaleProduct && (
+            <Paper withBorder radius="md" p="sm">
+              <Group justify="space-between">
+                <Stack gap={2}>
+                  <Text fw={700}>{selectedSaleProduct.name}</Text>
+                  <Text size="xs" c="dimmed">
+                    {selectedSaleProduct.category} • {selectedSaleProduct.barcode ? `SKU: ${selectedSaleProduct.barcode}` : "Sin SKU"}
+                  </Text>
+                </Stack>
+                <Stack gap={0} align="flex-end">
+                  <Text size="xs" c="dimmed">Precio inventario</Text>
+                  <Text fw={700}>{formatCurrency(selectedSaleProduct.price)}</Text>
+                </Stack>
+              </Group>
+            </Paper>
+          )}
+
+          {!saleSearch && (
+            <Paper withBorder radius="md" p="md">
+              <Text size="sm" c="dimmed" ta="center">
+                Selecciona un producto para generar el informe real.
+              </Text>
+            </Paper>
+          )}
+
+          {saleSearch && saleReportRows.length === 0 && (
+            <Paper withBorder radius="md" p="md">
+              <Text size="sm" c="dimmed" ta="center">
+                No hay ventas registradas para el producto seleccionado.
+              </Text>
+            </Paper>
+          )}
+
+          {saleSearch && saleReportRows.length > 0 && (
+            <>
+              <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+                <Paper withBorder radius="md" p="sm">
+                  <Stack gap={2}>
+                    <Text size="xs" c="dimmed">Tickets encontrados</Text>
+                    <Text fw={700} size="lg">{saleReportSummary.tickets}</Text>
+                  </Stack>
+                </Paper>
+                <Paper withBorder radius="md" p="sm">
+                  <Stack gap={2}>
+                    <Text size="xs" c="dimmed">Cantidad vendida</Text>
+                    <Text fw={700} size="lg">{saleReportSummary.quantity} unidades</Text>
+                  </Stack>
+                </Paper>
+                <Paper withBorder radius="md" p="sm">
+                  <Stack gap={2}>
+                    <Text size="xs" c="dimmed">Total vendido</Text>
+                    <Text fw={700} size="lg">{formatCurrency(saleReportSummary.total)}</Text>
+                  </Stack>
+                </Paper>
+              </SimpleGrid>
+
+              <ScrollArea h={360}>
+                <Table highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Fecha</Table.Th>
+                      <Table.Th>Ticket</Table.Th>
+                      <Table.Th>Producto</Table.Th>
+                      <Table.Th>Vendedor</Table.Th>
+                      <Table.Th>Método</Table.Th>
+                      <Table.Th>Precio</Table.Th>
+                      <Table.Th>Cantidad</Table.Th>
+                      <Table.Th>Subtotal</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {saleReportRows.map((row) => (
+                      <Table.Tr key={`${row.saleId}-${row.productName}-${row.createdAt}`}>
+                        <Table.Td>{formatDateTime(row.createdAt)}</Table.Td>
+                        <Table.Td>#{row.ticket}</Table.Td>
+                        <Table.Td>{row.productName}</Table.Td>
+                        <Table.Td>{row.seller}</Table.Td>
+                        <Table.Td>{row.paymentLabel}</Table.Td>
+                        <Table.Td>{formatCurrency(row.unitPrice)}</Table.Td>
+                        <Table.Td>{row.quantity}</Table.Td>
+                        <Table.Td>
+                          <Text fw={600}>{formatCurrency(row.subtotal)}</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </>
+          )}
+        </Stack>
+      </Modal>
     </Stack >
   );
 };
