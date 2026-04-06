@@ -2423,6 +2423,15 @@ const AppContent = () => {
 
   const [returnDrawerOpened, returnDrawerHandlers] = useDisclosure(false);
   const [returnSaleId, setReturnSaleId] = useState<string | null>(null);
+
+  // Sanity check: fetch directo para comprobar conexión desde el navegador.
+  useEffect(() => {
+    const testFetch = async () => {
+      const res = await supabase.from("pudahuel_products").select("id").limit(1);
+      console.info("[Supabase TEST browser] status", res.status, "error", res.error?.message, "rows", res.data?.length);
+    };
+    void testFetch();
+  }, []);
   const [returnItems, setReturnItems] = useState<Record<string, number>>({});
   const [returnReason, setReturnReason] = useState("");
   const [returnRefundMethod, setReturnRefundMethod] = useState<"cash" | "card" | "product">("cash");
