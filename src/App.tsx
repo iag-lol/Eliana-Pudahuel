@@ -134,7 +134,6 @@ import {
   ShiftSummary,
   ShiftType
 } from "./types";
-import { FALLBACK_CLIENTS, FALLBACK_SHIFTS } from "./data/fallback";
 import { formatCurrency, formatDate, formatDateTime, formatTime } from "./utils/format";
 import { applyInternalDiscount } from "./utils/internalDiscount";
 import { generateClientReport, generateSummaryReport } from "./utils/pdfGenerator";
@@ -450,8 +449,7 @@ async function fetchClients({ includeHistory }: { includeHistory: boolean }): Pr
     .range(0, CLIENTS_FETCH_LIMIT - 1);
 
   if (clientsError) {
-    console.warn("Fallo al cargar clientes, usando datos locales", clientsError.message);
-    return FALLBACK_CLIENTS;
+    throw new Error(`No se pudo leer clientes (pudahuel_clients): ${clientsError.message}`);
   }
 
   if (!includeHistory) {
@@ -546,8 +544,7 @@ async function fetchShifts(): Promise<Shift[]> {
     .range(0, SHIFTS_FETCH_LIMIT - 1);
 
   if (error) {
-    console.warn("Fallo al cargar turnos, usando datos locales", error.message);
-    return FALLBACK_SHIFTS;
+    throw new Error(`No se pudo leer turnos (pudahuel_shifts): ${error.message}`);
   }
 
   return (data ?? []).map(mapShiftRow);
@@ -2495,7 +2492,7 @@ const AppContent = () => {
   const clientsQuery = useQuery({
     queryKey: ["clients", clientsMode],
     queryFn: () => fetchClients({ includeHistory: activeTab === "fiados" }),
-    initialData: FALLBACK_CLIENTS,
+    initialData: [] as Client[],
     enabled: activeTab === "pos" || activeTab === "fiados" || activeTab === "dashboard",
     staleTime: activeTab === "fiados" ? 60_000 : 3 * 60_000
   });
@@ -2503,7 +2500,7 @@ const AppContent = () => {
   const shiftsQuery = useQuery({
     queryKey: ["shifts"],
     queryFn: fetchShifts,
-    initialData: FALLBACK_SHIFTS,
+    initialData: [] as Shift[],
     staleTime: 60_000
   });
 
