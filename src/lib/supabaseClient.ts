@@ -26,6 +26,11 @@ const normalizeSupabaseUrl = (value: string) => {
 const envSupabaseUrl = normalizeSupabaseUrl(cleanEnv(import.meta.env.VITE_SUPABASE_URL));
 const envSupabaseAnonKey = cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
+console.info("[Supabase] Vite env", {
+  VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
+  VITE_SUPABASE_ANON_KEY_present: Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY)
+});
+
 const hasSupabaseConfig = envSupabaseUrl.length > 0 && envSupabaseAnonKey.length > 0;
 const looksLikeSupabase = envSupabaseUrl.includes(".supabase.co") || envSupabaseUrl.includes(".supabase.in");
 const anonKeyLengthOk = envSupabaseAnonKey.length > 40;
