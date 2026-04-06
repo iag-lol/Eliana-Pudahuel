@@ -1,9 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 
-const FALLBACK_URL = "https://wvcplgwemvqhvtstlqmt.supabase.co";
-const FALLBACK_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2Y3BsZ3dlbXZxaHZ0c3RscW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAzNjIyMDUsImV4cCI6MjA3NTkzODIwNX0.K1YOv5lRn9fOous3AyG2gPxsQBzqOXRfYHgrCmO5zxk";
-
 const cleanEnv = (value: unknown) => {
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
@@ -29,9 +25,10 @@ const normalizeSupabaseUrl = (value: string) => {
 
 const envSupabaseUrl = normalizeSupabaseUrl(cleanEnv(import.meta.env.VITE_SUPABASE_URL));
 const envSupabaseAnonKey = cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY);
+const hasSupabaseConfig = envSupabaseUrl.length > 0 && envSupabaseAnonKey.length > 0;
 
-export const SUPABASE_URL = envSupabaseUrl.length > 0 ? envSupabaseUrl : FALLBACK_URL;
-const SUPABASE_ANON_KEY = envSupabaseAnonKey.length > 0 ? envSupabaseAnonKey : FALLBACK_ANON_KEY;
+export const SUPABASE_URL = hasSupabaseConfig ? envSupabaseUrl : "https://invalid.supabase.co";
+const SUPABASE_ANON_KEY = hasSupabaseConfig ? envSupabaseAnonKey : "missing-supabase-anon-key";
 export const SUPABASE_PROJECT_REF = (() => {
   try {
     return new URL(SUPABASE_URL).hostname.split(".")[0] ?? "unknown";
@@ -40,10 +37,8 @@ export const SUPABASE_PROJECT_REF = (() => {
   }
 })();
 
-if (envSupabaseUrl.length === 0 || envSupabaseAnonKey.length === 0) {
-  console.warn(
-    "VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY inválidas/vacías. Se usarán credenciales fallback solo para desarrollo."
-  );
+if (!hasSupabaseConfig) {
+  console.error("VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY inválidas/vacías en el entorno.");
 }
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
