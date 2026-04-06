@@ -317,7 +317,7 @@ const mapProductRow = (row: any): Product => ({
   category: row.category,
   price: row.price ?? 0,
   stock: row.stock ?? 0,
-  minStock: row.min_stock ?? row.stock_min ?? 5,
+  minStock: row.min_stock ?? row.stock_min ?? 0,
   created_at: row.created_at,
   updated_at: row.updated_at
 });
@@ -378,7 +378,7 @@ const mapClientRow = (row: any): Client => {
 
 const mapSaleRow = (row: any): Sale => ({
   id: row.id?.toString?.() ?? String(row.id),
-  ticket: row.ticket?.toString?.() ?? String(row.ticket),
+  ticket: row.ticket ? row.ticket.toString() : row.id?.toString?.() ?? "",
   type: row.type ?? "sale",
   total: row.total ?? 0,
   paymentMethod: isPaymentMethod(row.payment_method) ? row.payment_method : "cash",
@@ -575,10 +575,10 @@ async function fetchExpenses(shiftId?: string): Promise<ShiftExpense[]> {
     shift_id: row.shift_id?.toString() ?? "",
     expense_type: row.expense_type,
     amount: row.amount,
-    supplier_name: row.supplier_name,
-    description: row.description,
+    supplier_name: (row as any).supplier_name,
+    description: (row as any).description,
     created_at: row.created_at,
-    paid_from_cash: row.paid_from_cash ?? false
+    paid_from_cash: (row as any).paid_from_cash ?? false
   }));
 }
 
@@ -2578,13 +2578,6 @@ const AppContent = () => {
       stockRequests: stockRequests.length
     });
   }, [products.length, clients.length, sales.length, shifts.length, stockRequests.length]);
-  console.info("[Debug] lengths", {
-    products: products.length,
-    clients: clients.length,
-    sales: sales.length,
-    shifts: shifts.length,
-    stockRequests: stockRequests.length
-  });
   const hasMoreSalesPages = sales.length === SALES_PAGE_SIZE;
   const isSaleInsideCurrentPageWindow = useCallback(
     (createdAt: string) => {
@@ -2602,6 +2595,53 @@ const AppContent = () => {
     [clients, selectedFiadoClient]
   );
   const shiftSummary = useMemo(() => computeShiftSummary(sales, activeShift?.id ?? null), [sales, activeShift]);
+
+  // Bootstrap: si todo llega vacío, cargar manualmente y poblar cache React Query
+  useEffect(() => {
+    const shouldBootstrap = products.length === 0 && clients.length === 0 && sales.length === 0 && shifts.length === 0;
+    if (!shouldBootstrap) return;
+    const loadAll = async () => {
+      try {
+        console.info("[Bootstrap] inicio carga directa");
+        const [prodRes, clientRes, shiftRes, salesRes] = await Promise.all([
+          supabase.from("pudahuel_products").select("id,name,barcode,category,price,stock").limit(PRODUCTS_FETCH_LIMIT),
+          supabase.from("pudahuel_clients").select('id,name,authorized,balance,"limit"').limit(CLIENTS_FETCH_LIMIT),
+          supabase.from("pudahuel_shifts").select("id,seller,type,start_time,end_time,status,initial_cash").order("start_time", { ascending: false }).limit(SHIFTS_FETCH_LIMIT),
+          supabase.from("pudahuel_sales").select("id,ticket,type,total,payment_method,shift_id,client_id,created_at,items").order("created_at", { ascending: false }).limit(SALES_PAGE_SIZE)
+        ]);
+        if (!prodRes.error && prodRes.data) {
+          queryClient.setQueryData<Product[]>(["products"], prodRes.data.map(mapProductRow));
+          console.info("[Bootstrap] productos", prodRes.data.length);
+        } else {
+          console.error("[Bootstrap] productos error", prodRes.error?.message);
+        }
+        if (!clientRes.error && clientRes.data) {
+          const mapped = clientRes.data.map(mapClientRow);
+          queryClient.setQueryData<Client[]>(["clients", "base"], mapped);
+          queryClient.setQueryData<Client[]>(["clients", "with-history"], mapped);
+          console.info("[Bootstrap] clientes", mapped.length);
+        } else {
+          console.error("[Bootstrap] clientes error", clientRes.error?.message);
+        }
+        if (!shiftRes.error && shiftRes.data) {
+          queryClient.setQueryData<Shift[]>(["shifts"], shiftRes.data.map(mapShiftRow));
+          console.info("[Bootstrap] shifts", shiftRes.data.length);
+        } else {
+          console.error("[Bootstrap] shifts error", shiftRes.error?.message);
+        }
+        if (!salesRes.error && salesRes.data) {
+          queryClient.setQueryData<Sale[]>(["sales", salesDateRange.from, salesDateRange.to, 0, includeSalesItems ? "detail" : "light"], salesRes.data.map(mapSaleRow));
+          console.info("[Bootstrap] sales", salesRes.data.length);
+        } else {
+          console.error("[Bootstrap] sales error", salesRes.error?.message);
+        }
+      } catch (err: any) {
+        console.error("[Bootstrap] fallo general", err?.message ?? err);
+      }
+    };
+    void loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products.length, clients.length, sales.length, shifts.length, salesDateRange.from, salesDateRange.to, includeSalesItems]);
 
   useEffect(() => {
     if (selectedPayment === "fiado") {
@@ -3537,17 +3577,17 @@ const AppContent = () => {
     }
 
     const inserted = insertedExpenseRows?.[0];
-    if (inserted) {
-      const mapped: ShiftExpense = {
-        id: inserted.id.toString(),
-        shift_id: inserted.shift_id?.toString() ?? "",
-        expense_type: inserted.expense_type,
-        amount: inserted.amount,
-        supplier_name: inserted.supplier_name,
-        description: inserted.description,
-        created_at: inserted.created_at,
-        paid_from_cash: inserted.paid_from_cash ?? false
-      };
+  if (inserted) {
+    const mapped: ShiftExpense = {
+      id: inserted.id.toString(),
+      shift_id: inserted.shift_id?.toString() ?? "",
+      expense_type: inserted.expense_type,
+      amount: inserted.amount,
+      supplier_name: (inserted as any).supplier_name,
+      description: (inserted as any).description,
+      created_at: inserted.created_at,
+      paid_from_cash: (inserted as any).paid_from_cash ?? false
+    };
       queryClient.setQueryData<ShiftExpense[]>(["expenses", expense.shift_id], (prev = []) => [mapped, ...prev]);
     }
   };
@@ -3641,17 +3681,17 @@ const AppContent = () => {
     setCashOpNote("");
     cashOpModalHandlers.close();
     const inserted = insertedExpenseRows?.[0];
-    if (inserted) {
-      const mapped: ShiftExpense = {
-        id: inserted.id.toString(),
-        shift_id: inserted.shift_id?.toString() ?? "",
-        expense_type: inserted.expense_type,
-        amount: inserted.amount,
-        supplier_name: inserted.supplier_name,
-        description: inserted.description,
-        created_at: inserted.created_at,
-        paid_from_cash: inserted.paid_from_cash ?? false
-      };
+  if (inserted) {
+    const mapped: ShiftExpense = {
+      id: inserted.id.toString(),
+      shift_id: inserted.shift_id?.toString() ?? "",
+      expense_type: inserted.expense_type,
+      amount: inserted.amount,
+      supplier_name: (inserted as any).supplier_name,
+      description: (inserted as any).description,
+      created_at: inserted.created_at,
+      paid_from_cash: (inserted as any).paid_from_cash ?? false
+    };
       queryClient.setQueryData<ShiftExpense[]>(["expenses", activeShift.id], (prev = []) => [mapped, ...prev]);
     }
   };

@@ -3,13 +3,14 @@ import dayjs from "dayjs";
 import type { ReportFilters } from "../types";
 import type { StockRequest } from "../types";
 
-export const PRODUCT_COLUMNS = "id,name,barcode,category,price,stock,stock_min,created_at,updated_at";
-export const CLIENT_COLUMNS = 'id, name, authorized, balance, "limit", payment_schedule, updated_at';
-export const SHIFT_COLUMNS = "id,seller,type,start_time,end_time,status,initial_cash,cash_expected,cash_counted,difference,total_sales,tickets,payments_breakdown,total_expenses,created_at";
-export const EXPENSE_COLUMNS = "id,shift_id,expense_type,amount,supplier_name,description,created_at,paid_from_cash";
-export const STOCK_REQUEST_COLUMNS = "id,product_id,product_name,requested_qty,final_qty,requested_by,requested_at,created_at,updated_at";
-export const STOCK_REQUEST_WRITE_COLUMNS = "id,product_id,product_name,requested_qty,final_qty,requested_by,requested_at,created_at";
-export const SALES_LIGHT_COLUMNS = "id,ticket,type,total,payment_method,cash_received,change_amount,shift_id,client_id,seller,created_at";
+// Columnas reducidas para compatibilidad con el schema actual del proyecto
+export const PRODUCT_COLUMNS = "id,name,barcode,category,price,stock";
+export const CLIENT_COLUMNS = 'id, name, authorized, balance, "limit"';
+export const SHIFT_COLUMNS = "id,seller,type,start_time,end_time,status,initial_cash";
+export const EXPENSE_COLUMNS = "id,shift_id,expense_type,amount,created_at";
+export const STOCK_REQUEST_COLUMNS = "id,product_id,product_name,requested_qty,final_qty,requested_at,created_at";
+export const STOCK_REQUEST_WRITE_COLUMNS = "id,product_id,product_name,requested_qty,final_qty,requested_at,created_at";
+export const SALES_LIGHT_COLUMNS = "id,ticket,type,total,payment_method,shift_id,client_id,created_at";
 export const SALES_DETAIL_COLUMNS = `${SALES_LIGHT_COLUMNS},items`;
 export const SALES_WRITE_RETURN_COLUMNS = SALES_LIGHT_COLUMNS;
 
