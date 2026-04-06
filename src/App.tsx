@@ -2562,9 +2562,15 @@ const AppContent = () => {
     refetchOnWindowFocus: false
   });
 
-  const products = productQuery.data ?? [];
-  const clients = clientsQuery.data ?? [];
-  const sales = salesQuery.data ?? [];
+  // Permitir override manual cuando el bootstrap cargue datos
+  const [bootstrapProducts, setBootstrapProducts] = useState<Product[] | null>(null);
+  const [bootstrapClients, setBootstrapClients] = useState<Client[] | null>(null);
+  const [bootstrapShifts, setBootstrapShifts] = useState<Shift[] | null>(null);
+  const [bootstrapSales, setBootstrapSales] = useState<Sale[] | null>(null);
+
+  const products = (bootstrapProducts ?? productQuery.data) ?? [];
+  const clients = (bootstrapClients ?? clientsQuery.data) ?? [];
+  const sales = (bootstrapSales ?? salesQuery.data) ?? [];
   const stockRequests = stockRequestsQuery.data ?? [];
   const inventoryLoadError = productQuery.error instanceof Error ? productQuery.error.message : null;
   const salesLoadError = salesQuery.error instanceof Error ? salesQuery.error.message : null;
@@ -2610,27 +2616,34 @@ const AppContent = () => {
           supabase.from("pudahuel_sales").select("id,ticket,type,total,payment_method,shift_id,client_id,created_at,items").order("created_at", { ascending: false }).limit(SALES_PAGE_SIZE)
         ]);
         if (!prodRes.error && prodRes.data) {
-          queryClient.setQueryData<Product[]>(["products"], prodRes.data.map(mapProductRow));
+          const mapped = prodRes.data.map(mapProductRow);
+          setBootstrapProducts(mapped);
+          queryClient.setQueryData<Product[]>(["products"], mapped);
           console.info("[Bootstrap] productos", prodRes.data.length);
         } else {
           console.error("[Bootstrap] productos error", prodRes.error?.message);
         }
         if (!clientRes.error && clientRes.data) {
-          const mapped = clientRes.data.map(mapClientRow);
-          queryClient.setQueryData<Client[]>(["clients", "base"], mapped);
-          queryClient.setQueryData<Client[]>(["clients", "with-history"], mapped);
-          console.info("[Bootstrap] clientes", mapped.length);
+          const mappedClients = clientRes.data.map(mapClientRow);
+          setBootstrapClients(mappedClients);
+          queryClient.setQueryData<Client[]>(["clients", "base"], mappedClients);
+          queryClient.setQueryData<Client[]>(["clients", "with-history"], mappedClients);
+          console.info("[Bootstrap] clientes", mappedClients.length);
         } else {
           console.error("[Bootstrap] clientes error", clientRes.error?.message);
         }
         if (!shiftRes.error && shiftRes.data) {
-          queryClient.setQueryData<Shift[]>(["shifts"], shiftRes.data.map(mapShiftRow));
+          const mappedShifts = shiftRes.data.map(mapShiftRow);
+          setBootstrapShifts(mappedShifts);
+          queryClient.setQueryData<Shift[]>(["shifts"], mappedShifts);
           console.info("[Bootstrap] shifts", shiftRes.data.length);
         } else {
           console.error("[Bootstrap] shifts error", shiftRes.error?.message);
         }
         if (!salesRes.error && salesRes.data) {
-          queryClient.setQueryData<Sale[]>(["sales", salesDateRange.from, salesDateRange.to, 0, includeSalesItems ? "detail" : "light"], salesRes.data.map(mapSaleRow));
+          const mappedSales = salesRes.data.map(mapSaleRow);
+          setBootstrapSales(mappedSales);
+          queryClient.setQueryData<Sale[]>(["sales", salesDateRange.from, salesDateRange.to, 0, includeSalesItems ? "detail" : "light"], mappedSales);
           console.info("[Bootstrap] sales", salesRes.data.length);
         } else {
           console.error("[Bootstrap] sales error", salesRes.error?.message);
