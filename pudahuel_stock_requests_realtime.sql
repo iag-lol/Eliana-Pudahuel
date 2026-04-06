@@ -44,16 +44,21 @@ DROP POLICY IF EXISTS "Permitir actualización de solicitudes de stock" ON publi
 DROP POLICY IF EXISTS "Permitir eliminación de solicitudes de stock" ON public.pudahuel_stock_requests;
 
 CREATE POLICY "Permitir lectura pública de solicitudes de stock"
-    ON public.pudahuel_stock_requests FOR SELECT USING (true);
+    ON public.pudahuel_stock_requests FOR SELECT TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 CREATE POLICY "Permitir inserción de solicitudes de stock"
-    ON public.pudahuel_stock_requests FOR INSERT WITH CHECK (true);
+    ON public.pudahuel_stock_requests FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() IS NOT NULL);
 
 CREATE POLICY "Permitir actualización de solicitudes de stock"
-    ON public.pudahuel_stock_requests FOR UPDATE USING (true);
+    ON public.pudahuel_stock_requests FOR UPDATE TO authenticated
+    USING (auth.uid() IS NOT NULL)
+    WITH CHECK (auth.uid() IS NOT NULL);
 
 CREATE POLICY "Permitir eliminación de solicitudes de stock"
-    ON public.pudahuel_stock_requests FOR DELETE USING (true);
+    ON public.pudahuel_stock_requests FOR DELETE TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 -- Asegura que PostgreSQL Changes envíe eventos en tiempo real para esta tabla
 DO $$

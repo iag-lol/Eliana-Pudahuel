@@ -97,6 +97,27 @@ import {
 } from "lucide-react";
 import { supabase, SUPABASE_PROJECT_REF } from "./lib/supabaseClient";
 import {
+  CLIENTS_FETCH_LIMIT,
+  CLIENT_COLUMNS,
+  CLIENT_HISTORY_LOOKBACK_DAYS,
+  CLIENT_FIADO_HISTORY_LIMIT,
+  EXPENSES_FETCH_LIMIT,
+  EXPENSE_COLUMNS,
+  PRODUCTS_FETCH_LIMIT,
+  PRODUCT_COLUMNS,
+  SALES_WRITE_RETURN_COLUMNS,
+  SALES_PAGE_SIZE,
+  SHIFTS_FETCH_LIMIT,
+  SHIFT_COLUMNS,
+  STOCK_REQUEST_COLUMNS,
+  STOCK_REQUEST_WRITE_COLUMNS,
+  STOCK_REQUESTS_LIMIT,
+  fetchSalesPage,
+  getSalesDateRangeForTab
+} from "./lib/queryHelpers";
+import { usePageVisibility } from "./hooks/usePageVisibility";
+import { useStockRequestsRealtime } from "./hooks/useStockRequestsRealtime";
+import {
   CartLine,
   Client,
   ClientMovement,
@@ -406,8 +427,9 @@ const generateId = () =>
 async function fetchProducts(): Promise<Product[]> {
   const { data, error, status } = await supabase
     .from("pudahuel_products")
-    .select("*")
-    .order("name", { ascending: true });
+    .select(PRODUCT_COLUMNS)
+    .order("name", { ascending: true })
+    .range(0, PRODUCTS_FETCH_LIMIT - 1);
 
   if (error) {
     if (status === 540 || error.message.toLowerCase().includes("project paused")) {
@@ -420,22 +442,34 @@ async function fetchProducts(): Promise<Product[]> {
   return (data ?? []).map(mapProductRow);
 }
 
-async function fetchClients(): Promise<Client[]> {
+async function fetchClients({ includeHistory }: { includeHistory: boolean }): Promise<Client[]> {
   const { data: clientsData, error: clientsError } = await supabase
     .from("pudahuel_clients")
-    .select('id, name, authorized, balance, "limit", updated_at')
-    .order("name", { ascending: true });
+    .select(CLIENT_COLUMNS)
+    .order("name", { ascending: true })
+    .range(0, CLIENTS_FETCH_LIMIT - 1);
 
   if (clientsError) {
     console.warn("Fallo al cargar clientes, usando datos locales", clientsError.message);
     return FALLBACK_CLIENTS;
   }
 
+  if (!includeHistory) {
+    return (clientsData ?? []).map((row: any) => ({
+      ...mapClientRow(row),
+      history: []
+    }));
+  }
+
+  const fiadoSince = dayjs().subtract(CLIENT_HISTORY_LOOKBACK_DAYS, "day").startOf("day").toISOString();
   const { data: fiadoSales, error: salesError } = await supabase
     .from("pudahuel_sales")
-    .select("id, ticket, total, created_at, notes")
+    .select("id, ticket, total, created_at, client_id")
     .eq("payment_method", "fiado")
-    .order("created_at", { ascending: false });
+    .not("client_id", "is", null)
+    .gte("created_at", fiadoSince)
+    .order("created_at", { ascending: false })
+    .range(0, CLIENT_FIADO_HISTORY_LIMIT - 1);
 
   if (salesError) {
     console.warn("Fallo al cargar ventas fiado", salesError.message);
@@ -443,7 +477,7 @@ async function fetchClients(): Promise<Client[]> {
 
   const movementsByClient = new Map<string, ClientMovement[]>();
   (fiadoSales ?? []).forEach((sale: any) => {
-    const clientId = sale.notes?.clientId?.toString?.() ?? String(sale.notes?.clientId ?? "");
+    const clientId = sale.client_id?.toString?.() ?? String(sale.client_id ?? "");
     if (!clientId) return;
 
     const amount = toNumber(sale.total);
@@ -476,11 +510,22 @@ async function fetchClients(): Promise<Client[]> {
   return result;
 }
 
-async function fetchSales(): Promise<Sale[]> {
-  const { data, error, status } = await supabase
-    .from("pudahuel_sales")
-    .select("*")
-    .order("created_at", { ascending: false });
+type SalesQueryOptions = {
+  from: string;
+  to: string;
+  page: number;
+  pageSize?: number;
+  includeItems?: boolean;
+};
+
+async function fetchSales(options: SalesQueryOptions): Promise<Sale[]> {
+  const { data, error, status } = await fetchSalesPage(supabase, {
+    from: options.from,
+    to: options.to,
+    page: options.page,
+    pageSize: options.pageSize ?? SALES_PAGE_SIZE,
+    includeItems: options.includeItems ?? true
+  });
 
   if (error) {
     if (status === 540 || error.message.toLowerCase().includes("project paused")) {
@@ -496,8 +541,9 @@ async function fetchSales(): Promise<Sale[]> {
 async function fetchShifts(): Promise<Shift[]> {
   const { data, error } = await supabase
     .from("pudahuel_shifts")
-    .select("*")
-    .order("start_time", { ascending: false });
+    .select(SHIFT_COLUMNS)
+    .order("start_time", { ascending: false })
+    .range(0, SHIFTS_FETCH_LIMIT - 1);
 
   if (error) {
     console.warn("Fallo al cargar turnos, usando datos locales", error.message);
@@ -510,8 +556,9 @@ async function fetchShifts(): Promise<Shift[]> {
 async function fetchExpenses(shiftId?: string): Promise<ShiftExpense[]> {
   let query = supabase
     .from("pudahuel_shift_expenses")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select(EXPENSE_COLUMNS)
+    .order("created_at", { ascending: false })
+    .range(0, EXPENSES_FETCH_LIMIT - 1);
 
   if (shiftId) {
     query = query.eq("shift_id", shiftId);
@@ -539,8 +586,9 @@ async function fetchExpenses(shiftId?: string): Promise<ShiftExpense[]> {
 async function fetchStockRequests(): Promise<StockRequest[]> {
   const { data, error } = await supabase
     .from("pudahuel_stock_requests")
-    .select("*")
-    .order("requested_at", { ascending: false });
+    .select(STOCK_REQUEST_COLUMNS)
+    .order("requested_at", { ascending: false })
+    .limit(STOCK_REQUESTS_LIMIT);
 
   if (error) {
     const errorMessage = error.message.toLowerCase();
@@ -551,6 +599,58 @@ async function fetchStockRequests(): Promise<StockRequest[]> {
   }
 
   return (data ?? []).map(mapStockRequestRow);
+}
+
+type StockAdjustment = {
+  productId: string;
+  delta: number;
+};
+
+const combineStockAdjustments = (adjustments: StockAdjustment[]) => {
+  const map = new Map<string, number>();
+  adjustments.forEach(({ productId, delta }) => {
+    if (!productId || !Number.isFinite(delta) || delta === 0) return;
+    map.set(productId, (map.get(productId) ?? 0) + delta);
+  });
+  return Array.from(map.entries()).map(([productId, delta]) => ({ productId, delta }));
+};
+
+async function applyStockAdjustments(adjustments: StockAdjustment[], fallbackProducts: Map<string, Product>) {
+  const compactAdjustments = combineStockAdjustments(adjustments);
+  if (compactAdjustments.length === 0) return;
+
+  const rpcPayload = compactAdjustments.map(({ productId, delta }) => ({
+    product_id: productId,
+    delta_qty: Math.trunc(delta)
+  }));
+
+  const { error: rpcError } = await supabase.rpc("pudahuel_apply_stock_adjustments", {
+    adjustments: rpcPayload
+  });
+
+  if (!rpcError) return;
+
+  const message = rpcError.message.toLowerCase();
+  const missingFunction =
+    message.includes("does not exist") ||
+    message.includes("could not find the function") ||
+    message.includes("pudahuel_apply_stock_adjustments");
+
+  if (!missingFunction) {
+    throw rpcError;
+  }
+
+  // Fallback transitorio para mantener compatibilidad hasta desplegar el RPC en producción.
+  await Promise.all(
+    compactAdjustments.map(async ({ productId, delta }) => {
+      const current = fallbackProducts.get(productId);
+      if (!current) return;
+      await supabase
+        .from("pudahuel_products")
+        .update({ stock: Math.max(0, (current.stock ?? 0) + delta), updated_at: new Date().toISOString() })
+        .eq("id", productId);
+    })
+  );
 }
 
 const computeShiftSummary = (sales: Sale[], shiftId: string | null | undefined): ShiftSummary => {
@@ -2370,74 +2470,114 @@ const AppContent = () => {
     }
   }, [userRole, pendingTab]);
 
+  const [salesPage, setSalesPage] = useState(0);
+  const isPageVisible = usePageVisibility();
+  const canManageInventory = userRole === "admin" || userRole === "manager";
+  const isInventoryTab = activeTab === "inventory";
+  const salesDateRange = useMemo(
+    () => getSalesDateRangeForTab(activeTab, reportFilters),
+    [activeTab, reportFilters]
+  );
+
+  useEffect(() => {
+    setSalesPage(0);
+  }, [salesDateRange.from, salesDateRange.to]);
+
   const productQuery = useQuery({
     queryKey: ["products"],
     queryFn: fetchProducts,
-    initialData: [] as Product[]
+    initialData: [] as Product[],
+    enabled: activeTab !== "fiados",
+    staleTime: 3 * 60_000
   });
 
+  const clientsMode = activeTab === "fiados" ? "with-history" : "base";
   const clientsQuery = useQuery({
-    queryKey: ["clients"],
-    queryFn: fetchClients,
-    initialData: FALLBACK_CLIENTS
-  });
-
-  const salesQuery = useQuery({
-    queryKey: ["sales"],
-    queryFn: fetchSales,
-    initialData: [] as Sale[]
+    queryKey: ["clients", clientsMode],
+    queryFn: () => fetchClients({ includeHistory: activeTab === "fiados" }),
+    initialData: FALLBACK_CLIENTS,
+    enabled: activeTab === "pos" || activeTab === "fiados" || activeTab === "dashboard",
+    staleTime: activeTab === "fiados" ? 60_000 : 3 * 60_000
   });
 
   const shiftsQuery = useQuery({
     queryKey: ["shifts"],
     queryFn: fetchShifts,
-    initialData: FALLBACK_SHIFTS
+    initialData: FALLBACK_SHIFTS,
+    staleTime: 60_000
   });
 
+  const shifts = shiftsQuery.data ?? [];
+  const activeShift = useMemo(() => shifts.find((shift) => shift.status === "open"), [shifts]);
+  const shouldLoadSales =
+    activeTab === "pos" ||
+    activeTab === "dashboard" ||
+    activeTab === "inventory" ||
+    activeTab === "reports" ||
+    activeTab === "shifts" ||
+    Boolean(activeShift);
+  const includeSalesItems = activeTab !== "fiados";
+  const salesQueryKey = ["sales", salesDateRange.from, salesDateRange.to, salesPage] as const;
+  const activeSalesQueryKey = [...salesQueryKey, includeSalesItems ? "detail" : "light"] as const;
+
+  const salesQuery = useQuery({
+    queryKey: activeSalesQueryKey,
+    queryFn: () =>
+      fetchSales({
+        from: salesDateRange.from,
+        to: salesDateRange.to,
+        page: salesPage,
+        pageSize: SALES_PAGE_SIZE,
+        includeItems: includeSalesItems
+      }),
+    initialData: [] as Sale[],
+    enabled: shouldLoadSales,
+    placeholderData: (previousData) => previousData
+  });
+
+  const stockRequestsEnabled = canManageInventory && isInventoryTab;
+  const stockRealtimeHealthy = useStockRequestsRealtime({
+    enabled: stockRequestsEnabled,
+    queryClient,
+    mapRow: mapStockRequestRow,
+    limit: STOCK_REQUESTS_LIMIT
+  });
   const stockRequestsQuery = useQuery({
     queryKey: ["stock-requests"],
     queryFn: fetchStockRequests,
     initialData: [] as StockRequest[],
-    refetchInterval: 3000,
-    refetchIntervalInBackground: true
+    enabled: stockRequestsEnabled,
+    staleTime: 2 * 60_000,
+    refetchInterval:
+      stockRequestsEnabled && isPageVisible ? (stockRealtimeHealthy ? 10 * 60_000 : 2 * 60_000) : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false
   });
 
   const products = productQuery.data ?? [];
   const clients = clientsQuery.data ?? [];
   const sales = salesQuery.data ?? [];
-  const shifts = shiftsQuery.data ?? [];
   const stockRequests = stockRequestsQuery.data ?? [];
   const inventoryLoadError = productQuery.error instanceof Error ? productQuery.error.message : null;
   const salesLoadError = salesQuery.error instanceof Error ? salesQuery.error.message : null;
   const stockRequestsLoadError = stockRequestsQuery.error instanceof Error ? stockRequestsQuery.error.message : null;
+  const hasMoreSalesPages = sales.length === SALES_PAGE_SIZE;
+  const isSaleInsideCurrentPageWindow = useCallback(
+    (createdAt: string) => {
+      const date = dayjs(createdAt);
+      return (
+        (date.isAfter(dayjs(salesDateRange.from)) || date.isSame(dayjs(salesDateRange.from))) &&
+        (date.isBefore(dayjs(salesDateRange.to)) || date.isSame(dayjs(salesDateRange.to)))
+      );
+    },
+    [salesDateRange.from, salesDateRange.to]
+  );
   const authorizedFiadoClients = useMemo(() => clients.filter((client) => client.authorized), [clients]);
   const selectedFiadoClientData = useMemo(
     () => clients.find((client) => client.id === selectedFiadoClient) ?? null,
     [clients, selectedFiadoClient]
   );
-  const activeShift = useMemo(() => shifts.find((shift) => shift.status === "open"), [shifts]);
   const shiftSummary = useMemo(() => computeShiftSummary(sales, activeShift?.id ?? null), [sales, activeShift]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("pudahuel-stock-requests")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pudahuel_stock_requests" },
-        () => {
-          void queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
-        }
-      )
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR") {
-          console.error("Realtime de solicitudes de stock desconectado. Se usará refresco automático.");
-        }
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
 
   useEffect(() => {
     if (selectedPayment === "fiado") {
@@ -2493,7 +2633,10 @@ const AppContent = () => {
       requested_by: requestedBy
     }));
 
-    const { error } = await supabase.from("pudahuel_stock_requests").insert(payload);
+    const { data: insertedRows, error } = await supabase
+      .from("pudahuel_stock_requests")
+      .insert(payload)
+      .select(STOCK_REQUEST_WRITE_COLUMNS);
 
     if (error) {
       notifications.show({
@@ -2504,7 +2647,14 @@ const AppContent = () => {
       throw error;
     }
 
-    await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
+    if (insertedRows?.length) {
+      const insertedMapped = insertedRows.map(mapStockRequestRow);
+      queryClient.setQueryData<StockRequest[]>(["stock-requests"], (prev = []) =>
+        [...insertedMapped, ...prev]
+          .sort((a, b) => dayjs(b.requestedAt).valueOf() - dayjs(a.requestedAt).valueOf())
+          .slice(0, STOCK_REQUESTS_LIMIT)
+      );
+    }
     notifications.show({
       title: "Solicitud enviada",
       message: `Se enviaron ${requests.length} productos para aprobación en inventario.`,
@@ -2528,7 +2678,9 @@ const AppContent = () => {
       return;
     }
 
-    await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
+    queryClient.setQueryData<StockRequest[]>(["stock-requests"], (prev = []) =>
+      prev.map((item) => (item.id === requestId ? { ...item, finalQty: safeQuantity } : item))
+    );
   };
 
   const handleApproveStockRequest = async (requestId: string) => {
@@ -2543,7 +2695,9 @@ const AppContent = () => {
         color: "red"
       });
       await supabase.from("pudahuel_stock_requests").delete().eq("id", requestId);
-      await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
+      queryClient.setQueryData<StockRequest[]>(["stock-requests"], (prev = []) =>
+        prev.filter((item) => item.id !== requestId)
+      );
       return;
     }
 
@@ -2580,10 +2734,20 @@ const AppContent = () => {
       });
     }
 
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["products"] }),
-      queryClient.invalidateQueries({ queryKey: ["stock-requests"] })
-    ]);
+    queryClient.setQueryData<Product[]>(["products"], (prev = []) =>
+      prev.map((item) =>
+        item.id === request.productId
+          ? {
+              ...item,
+              stock: newStock,
+              updated_at: new Date().toISOString()
+            }
+          : item
+      )
+    );
+    queryClient.setQueryData<StockRequest[]>(["stock-requests"], (prev = []) =>
+      prev.filter((item) => item.id !== requestId)
+    );
 
     notifications.show({
       title: "Stock autorizado",
@@ -2608,7 +2772,9 @@ const AppContent = () => {
       return;
     }
 
-    await queryClient.invalidateQueries({ queryKey: ["stock-requests"] });
+    queryClient.setQueryData<StockRequest[]>(["stock-requests"], (prev = []) =>
+      prev.filter((item) => item.id !== requestId)
+    );
 
     if (request) {
       notifications.show({
@@ -3138,10 +3304,10 @@ const AppContent = () => {
         notes: selectedPayment === "fiado" ? { clientId: selectedFiadoClient } : null
       };
 
-      const { data, error } = await supabase
+      const { data: insertedSaleRow, error } = await supabase
         .from("pudahuel_sales")
         .insert(payload)
-        .select("ticket")
+        .select(SALES_WRITE_RETURN_COLUMNS)
         .single();
 
       if (error) {
@@ -3153,13 +3319,9 @@ const AppContent = () => {
         return;
       }
 
-      await Promise.all(
-        saleItems.map((item) =>
-          supabase
-            .from("pudahuel_products")
-            .update({ stock: (productMap.get(item.productId)?.stock ?? 0) - item.quantity })
-            .eq("id", item.productId)
-        )
+      await applyStockAdjustments(
+        saleItems.map((item) => ({ productId: item.productId, delta: -item.quantity })),
+        productMap
       );
 
       if (selectedPayment === "fiado" && selectedFiadoClient) {
@@ -3191,33 +3353,74 @@ const AppContent = () => {
         }
       }
 
+      const insertedSale = insertedSaleRow ? mapSaleRow(insertedSaleRow) : null;
+
       notifications.show({
         title: "Venta registrada",
-        message: data?.ticket ? `Ticket #${data.ticket} generado correctamente.` : "Venta registrada correctamente.",
+        message: insertedSale?.ticket ? `Ticket #${insertedSale.ticket} generado correctamente.` : "Venta registrada correctamente.",
         color: "teal"
       });
 
       setCart([]);
       setCashReceived(undefined);
       setSelectedFiadoClient(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["products"] }),
-        queryClient.invalidateQueries({ queryKey: ["sales"] }),
-        queryClient.invalidateQueries({ queryKey: ["clients"] })
-      ]);
+      queryClient.setQueryData<Product[]>(["products"], (prev = []) =>
+        prev.map((product) => {
+          const sold = saleItems.find((item) => item.productId === product.id);
+          if (!sold) return product;
+          return {
+            ...product,
+            stock: Math.max(0, product.stock - sold.quantity),
+            updated_at: new Date().toISOString()
+          };
+        })
+      );
+      if (insertedSale && salesPage === 0 && isSaleInsideCurrentPageWindow(insertedSale.created_at)) {
+        queryClient.setQueryData<Sale[]>(activeSalesQueryKey, (prev = []) =>
+          [insertedSale, ...prev].slice(0, SALES_PAGE_SIZE)
+        );
+      }
+      if (selectedPayment === "fiado" && selectedFiadoClient) {
+        queryClient.setQueriesData<Client[]>({ queryKey: ["clients"] }, (prev = []) =>
+          prev.map((client) => {
+            if (client.id !== selectedFiadoClient) return client;
+            const newBalance = client.balance + cartTotals.total;
+            const historyEntry: ClientMovement | null = insertedSale
+              ? {
+                  id: insertedSale.id,
+                  client_id: client.id,
+                  amount: insertedSale.total,
+                  type: "fiado",
+                  description: `Compra ticket #${insertedSale.ticket}`,
+                  created_at: insertedSale.created_at,
+                  balance_after: newBalance
+                }
+              : null;
+            return {
+              ...client,
+              balance: newBalance,
+              history: historyEntry ? [historyEntry, ...(client.history ?? [])] : client.history
+            };
+          })
+        );
+      }
     } finally {
       setIsCompletingSale(false);
     }
   };
 
   const handleOpenShift = async ({ seller, type, initialCash }: { seller: string; type: ShiftType; initialCash: number }) => {
-    const { error } = await supabase.from("pudahuel_shifts").insert({
-      seller,
-      type,
-      start_time: new Date().toISOString(),
-      status: "open",
-      initial_cash: initialCash
-    });
+    const { data: insertedShift, error } = await supabase
+      .from("pudahuel_shifts")
+      .insert({
+        seller,
+        type,
+        start_time: new Date().toISOString(),
+        status: "open",
+        initial_cash: initialCash
+      })
+      .select(SHIFT_COLUMNS)
+      .single();
 
     if (error) {
       notifications.show({
@@ -3233,7 +3436,10 @@ const AppContent = () => {
       message: `Turno ${type === "dia" ? "día" : "noche"} para ${seller} con ${formatCurrency(initialCash)} inicial.`,
       color: "teal"
     });
-    await queryClient.invalidateQueries({ queryKey: ["shifts"] });
+    if (insertedShift) {
+      const mapped = mapShiftRow(insertedShift);
+      queryClient.setQueryData<Shift[]>(["shifts"], (prev = []) => [mapped, ...prev]);
+    }
     shiftModalHandlers.close();
   };
 
@@ -3243,7 +3449,7 @@ const AppContent = () => {
     const initialCash = activeShift.initial_cash ?? 0;
     const cashExpected = initialCash + (summary.byPayment.cash ?? 0) - cashExpensesTotal;
     const difference = cashCounted - cashExpected;
-    const { error } = await supabase
+    const { data: updatedShift, error } = await supabase
       .from("pudahuel_shifts")
       .update({
         end_time: new Date().toISOString(),
@@ -3256,7 +3462,9 @@ const AppContent = () => {
         payments_breakdown: summary.byPayment,
         total_expenses: totalExpensesAmount
       })
-      .eq("id", activeShift.id);
+      .eq("id", activeShift.id)
+      .select(SHIFT_COLUMNS)
+      .single();
 
     if (error) {
       notifications.show({
@@ -3273,19 +3481,27 @@ const AppContent = () => {
       color: difference === 0 ? "teal" : difference > 0 ? "green" : "orange"
     });
 
-    await queryClient.invalidateQueries({ queryKey: ["shifts"] });
+    if (updatedShift) {
+      const mapped = mapShiftRow(updatedShift);
+      queryClient.setQueryData<Shift[]>(["shifts"], (prev = []) =>
+        prev.map((shift) => (shift.id === mapped.id ? mapped : shift))
+      );
+    }
     shiftModalHandlers.close();
   };
 
   const handleAddExpense = async (expense: Omit<ShiftExpense, "id" | "created_at">) => {
-    const { error } = await supabase.from("pudahuel_shift_expenses").insert({
-      shift_id: expense.shift_id,
-      expense_type: expense.expense_type,
-      amount: expense.amount,
-      supplier_name: expense.supplier_name,
-      description: expense.description,
-      paid_from_cash: expense.paid_from_cash ?? true
-    });
+    const { data: insertedExpenseRows, error } = await supabase
+      .from("pudahuel_shift_expenses")
+      .insert({
+        shift_id: expense.shift_id,
+        expense_type: expense.expense_type,
+        amount: expense.amount,
+        supplier_name: expense.supplier_name,
+        description: expense.description,
+        paid_from_cash: expense.paid_from_cash ?? true
+      })
+      .select(EXPENSE_COLUMNS);
 
     if (error) {
       notifications.show({
@@ -3296,7 +3512,20 @@ const AppContent = () => {
       throw error;
     }
 
-    await queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    const inserted = insertedExpenseRows?.[0];
+    if (inserted) {
+      const mapped: ShiftExpense = {
+        id: inserted.id.toString(),
+        shift_id: inserted.shift_id?.toString() ?? "",
+        expense_type: inserted.expense_type,
+        amount: inserted.amount,
+        supplier_name: inserted.supplier_name,
+        description: inserted.description,
+        created_at: inserted.created_at,
+        paid_from_cash: inserted.paid_from_cash ?? false
+      };
+      queryClient.setQueryData<ShiftExpense[]>(["expenses", expense.shift_id], (prev = []) => [mapped, ...prev]);
+    }
   };
 
   const handleSaveShiftExpense = async (expense: {
@@ -3357,14 +3586,17 @@ const AppContent = () => {
       return;
     }
 
-    const { error } = await supabase.from("pudahuel_shift_expenses").insert({
-      shift_id: activeShift.id,
-      expense_type: "operacion",
-      amount: amountValue,
-      supplier_name: "Gasto operativo",
-      description: cashOpNote || null,
-      paid_from_cash: true
-    });
+    const { data: insertedExpenseRows, error } = await supabase
+      .from("pudahuel_shift_expenses")
+      .insert({
+        shift_id: activeShift.id,
+        expense_type: "operacion",
+        amount: amountValue,
+        supplier_name: "Gasto operativo",
+        description: cashOpNote || null,
+        paid_from_cash: true
+      })
+      .select(EXPENSE_COLUMNS);
 
     if (error) {
       notifications.show({
@@ -3384,7 +3616,20 @@ const AppContent = () => {
     setCashOpAmount(undefined);
     setCashOpNote("");
     cashOpModalHandlers.close();
-    await queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    const inserted = insertedExpenseRows?.[0];
+    if (inserted) {
+      const mapped: ShiftExpense = {
+        id: inserted.id.toString(),
+        shift_id: inserted.shift_id?.toString() ?? "",
+        expense_type: inserted.expense_type,
+        amount: inserted.amount,
+        supplier_name: inserted.supplier_name,
+        description: inserted.description,
+        created_at: inserted.created_at,
+        paid_from_cash: inserted.paid_from_cash ?? false
+      };
+      queryClient.setQueryData<ShiftExpense[]>(["expenses", activeShift.id], (prev = []) => [mapped, ...prev]);
+    }
   };
 
   const handleDeleteExpense = async (expenseId: string) => {
@@ -3408,18 +3653,26 @@ const AppContent = () => {
       color: "teal"
     });
 
-    await queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    if (activeShift?.id) {
+      queryClient.setQueryData<ShiftExpense[]>(["expenses", activeShift.id], (prev = []) =>
+        prev.filter((expense) => expense.id !== expenseId)
+      );
+    }
   };
 
   const handleCreateProduct = async (payload: ProductInput) => {
-    const { error } = await supabase.from("pudahuel_products").insert({
-      name: payload.name,
-      category: payload.category,
-      barcode: payload.barcode,
-      price: payload.price,
-      stock: payload.stock,
-      stock_min: payload.minStock
-    });
+    const { data: insertedProductRow, error } = await supabase
+      .from("pudahuel_products")
+      .insert({
+        name: payload.name,
+        category: payload.category,
+        barcode: payload.barcode,
+        price: payload.price,
+        stock: payload.stock,
+        stock_min: payload.minStock
+      })
+      .select(PRODUCT_COLUMNS)
+      .single();
 
     if (error) {
       notifications.show({
@@ -3435,7 +3688,12 @@ const AppContent = () => {
       message: `${payload.name} ya forma parte del inventario.`,
       color: "teal"
     });
-    await queryClient.invalidateQueries({ queryKey: ["products"] });
+    if (insertedProductRow) {
+      const mapped = mapProductRow(insertedProductRow);
+      queryClient.setQueryData<Product[]>(["products"], (prev = []) =>
+        [...prev, mapped].sort((a, b) => a.name.localeCompare(b.name))
+      );
+    }
   };
 
   const handleAddStock = async (productId: string, quantity: number, reason: string) => {
@@ -3443,10 +3701,12 @@ const AppContent = () => {
     if (!product) return;
 
     const newStock = product.stock + quantity;
-    const { error } = await supabase
+    const { data: updatedProductRow, error } = await supabase
       .from("pudahuel_products")
       .update({ stock: newStock })
-      .eq("id", productId);
+      .eq("id", productId)
+      .select(PRODUCT_COLUMNS)
+      .single();
 
     if (error) {
       notifications.show({
@@ -3463,7 +3723,12 @@ const AppContent = () => {
       color: "teal"
     });
 
-    await queryClient.invalidateQueries({ queryKey: ["products"] });
+    if (updatedProductRow) {
+      const mapped = mapProductRow(updatedProductRow);
+      queryClient.setQueryData<Product[]>(["products"], (prev = []) =>
+        prev.map((item) => (item.id === mapped.id ? mapped : item))
+      );
+    }
     addStockModalHandlers.close();
     setSelectedProductForStock(null);
   };
@@ -3480,10 +3745,12 @@ const AppContent = () => {
     if (updates.stock !== undefined) payload.stock = updates.stock;
     if (updates.minStock !== undefined) payload.stock_min = updates.minStock;
 
-    const { error } = await supabase
+    const { data: updatedProductRow, error } = await supabase
       .from("pudahuel_products")
       .update(payload)
-      .eq("id", productId);
+      .eq("id", productId)
+      .select(PRODUCT_COLUMNS)
+      .single();
 
     if (error) {
       notifications.show({
@@ -3500,7 +3767,12 @@ const AppContent = () => {
       color: "teal"
     });
 
-    await queryClient.invalidateQueries({ queryKey: ["products"] });
+    if (updatedProductRow) {
+      const mapped = mapProductRow(updatedProductRow);
+      queryClient.setQueryData<Product[]>(["products"], (prev = []) =>
+        prev.map((item) => (item.id === mapped.id ? mapped : item))
+      );
+    }
     editProductModalHandlers.close();
     setSelectedProductForEdit(null);
   };
@@ -3526,7 +3798,9 @@ const AppContent = () => {
       color: "teal"
     });
 
-    await queryClient.invalidateQueries({ queryKey: ["products"] });
+    queryClient.setQueryData<Product[]>(["products"], (prev = []) =>
+      prev.filter((item) => item.id !== productId)
+    );
     deleteProductModalHandlers.close();
     setSelectedProductForDelete(null);
   };
@@ -3553,22 +3827,26 @@ const AppContent = () => {
     const timestamp = new Date().toISOString();
     const returnTicket = `R-${sale.ticket}`;
 
-    const { error } = await supabase.from("pudahuel_sales").insert({
-      ticket: returnTicket,
-      type: "return",
-      total: totalReturn,
-      payment_method: returnRefundMethod,
-      shift_id: sale.shiftId,
-      seller: sale.seller,
-      created_at: timestamp,
-      items,
-      notes: {
-        reason: returnReason,
-        originalTicket: sale.ticket,
-        originalPaymentMethod: sale.paymentMethod,
-        refundMethod: returnRefundMethod
-      }
-    });
+    const { data: returnSaleRow, error } = await supabase
+      .from("pudahuel_sales")
+      .insert({
+        ticket: returnTicket,
+        type: "return",
+        total: totalReturn,
+        payment_method: returnRefundMethod,
+        shift_id: sale.shiftId,
+        seller: sale.seller,
+        created_at: timestamp,
+        items,
+        notes: {
+          reason: returnReason,
+          originalTicket: sale.ticket,
+          originalPaymentMethod: sale.paymentMethod,
+          refundMethod: returnRefundMethod
+        }
+      })
+      .select(SALES_WRITE_RETURN_COLUMNS)
+      .single();
 
     if (error) {
       notifications.show({
@@ -3579,13 +3857,9 @@ const AppContent = () => {
       return;
     }
 
-    await Promise.all(
-      items.map((item) =>
-        supabase
-          .from("pudahuel_products")
-          .update({ stock: (productMap.get(item.productId)?.stock ?? 0) + item.quantity })
-          .eq("id", item.productId)
-      )
+    await applyStockAdjustments(
+      items.map((item) => ({ productId: item.productId, delta: item.quantity })),
+      productMap
     );
 
     const refundMethodLabel = returnRefundMethod === "cash" ? "en efectivo" : returnRefundMethod === "card" ? "por tarjeta" : "por cambio de producto";
@@ -3600,10 +3874,25 @@ const AppContent = () => {
     setReturnReason("");
     setReturnRefundMethod("cash");
     returnDrawerHandlers.close();
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["sales"] }),
-      queryClient.invalidateQueries({ queryKey: ["products"] })
-    ]);
+    queryClient.setQueryData<Product[]>(["products"], (prev = []) =>
+      prev.map((product) => {
+        const returned = items.find((item) => item.productId === product.id);
+        if (!returned) return product;
+        return {
+          ...product,
+          stock: product.stock + returned.quantity,
+          updated_at: new Date().toISOString()
+        };
+      })
+    );
+    if (returnSaleRow && salesPage === 0) {
+      const mapped = mapSaleRow(returnSaleRow);
+      if (isSaleInsideCurrentPageWindow(mapped.created_at)) {
+        queryClient.setQueryData<Sale[]>(activeSalesQueryKey, (prev = []) =>
+          [mapped, ...prev].slice(0, SALES_PAGE_SIZE)
+        );
+      }
+    }
   };
 
   const handleChangePaymentMethod = async (saleId: string, method: PaymentMethod) => {
@@ -3627,7 +3916,9 @@ const AppContent = () => {
       color: "teal"
     });
     setPaymentEditSaleId(null);
-    await queryClient.invalidateQueries({ queryKey: ["sales"] });
+    queryClient.setQueryData<Sale[]>(activeSalesQueryKey, (prev = []) =>
+      prev.map((sale) => (sale.id === saleId ? { ...sale, paymentMethod: method } : sale))
+    );
   };
 
   const handleFiadoMovement = async ({ clientId, mode, amount, description }: { clientId: string; mode: "abono" | "total"; amount: number; description: string }) => {
@@ -3664,7 +3955,25 @@ const AppContent = () => {
       message: "Se actualizó la deuda del cliente.",
       color: "teal"
     });
-    await queryClient.invalidateQueries({ queryKey: ["clients"] });
+    queryClient.setQueriesData<Client[]>({ queryKey: ["clients"] }, (prev = []) =>
+      prev.map((item) => {
+        if (item.id !== clientId) return item;
+        const historyEntry: ClientMovement = {
+          id: `tmp-${Date.now()}`,
+          client_id: clientId,
+          amount,
+          type: mode === "total" ? "pago-total" : "abono",
+          description: mode === "total" ? "Pago total de la deuda" : description || "Abono registrado",
+          balance_after: newBalance,
+          created_at: new Date().toISOString()
+        };
+        return {
+          ...item,
+          balance: newBalance,
+          history: [historyEntry, ...(item.history ?? [])]
+        };
+      })
+    );
   };
 
   const handleAuthorizeFiado = async (clientId: string, authorized: boolean) => {
@@ -3687,7 +3996,9 @@ const AppContent = () => {
       message: "Se modificó la autorización del cliente.",
       color: "teal"
     });
-    await queryClient.invalidateQueries({ queryKey: ["clients"] });
+    queryClient.setQueriesData<Client[]>({ queryKey: ["clients"] }, (prev = []) =>
+      prev.map((item) => (item.id === clientId ? { ...item, authorized } : item))
+    );
   };
 
   const handleCreateClient = async ({ name, limit, authorized }: { name: string; limit: number; authorized: boolean }) => {
@@ -3699,7 +4010,7 @@ const AppContent = () => {
         balance: 0,
         "limit": limit
       })
-      .select('id, name, authorized, balance, "limit", updated_at')
+      .select(CLIENT_COLUMNS)
       .single();
 
     if (error) {
@@ -3719,7 +4030,12 @@ const AppContent = () => {
       message: `${name} fue agregado exitosamente con límite de ${formatCurrency(limit)}.`,
       color: "teal"
     });
-    await queryClient.invalidateQueries({ queryKey: ["clients"] });
+    if (data) {
+      const mapped = mapClientRow(data);
+      queryClient.setQueriesData<Client[]>({ queryKey: ["clients"] }, (prev = []) =>
+        [...prev, { ...mapped, history: [] }].sort((a, b) => a.name.localeCompare(b.name))
+      );
+    }
     clientModalHandlers.close();
   };
 
@@ -4693,6 +5009,13 @@ const AppContent = () => {
               <ReportsView
                 filters={reportFilters}
                 onChangeFilters={setReportFilters}
+                page={salesPage}
+                onPrevPage={() => setSalesPage((prev) => Math.max(0, prev - 1))}
+                onNextPage={() => {
+                  if (!hasMoreSalesPages) return;
+                  setSalesPage((prev) => prev + 1);
+                }}
+                hasMore={hasMoreSalesPages}
                 summary={reportSummary}
               />
             )}
@@ -6381,6 +6704,10 @@ const FiadosView = ({ clients, onAuthorize, onOpenModal, onOpenClientModal }: Fi
 interface ReportsViewProps {
   filters: ReportFilters;
   onChangeFilters: (filters: ReportFilters) => void;
+  page: number;
+  onPrevPage: () => void;
+  onNextPage: () => void;
+  hasMore: boolean;
   summary: {
     total: number;
     tickets: number;
@@ -6390,7 +6717,7 @@ interface ReportsViewProps {
   };
 }
 
-const ReportsView = ({ filters, onChangeFilters, summary }: ReportsViewProps) => {
+const ReportsView = ({ filters, onChangeFilters, page, onPrevPage, onNextPage, hasMore, summary }: ReportsViewProps) => {
   const paymentData = Object.entries(summary.byPayment).map(([key, value]) => ({
     name: key.toUpperCase(),
     value
@@ -6427,6 +6754,19 @@ const ReportsView = ({ filters, onChangeFilters, summary }: ReportsViewProps) =>
                   />
                 </Group>
               )}
+            </Group>
+          </Group>
+          <Group justify="space-between">
+            <Badge variant="light" color="blue">
+              Página {page + 1} · {SALES_PAGE_SIZE} registros
+            </Badge>
+            <Group>
+              <Button variant="default" onClick={onPrevPage} disabled={page === 0}>
+                Anterior
+              </Button>
+              <Button onClick={onNextPage} disabled={!hasMore}>
+                Siguiente
+              </Button>
             </Group>
           </Group>
           <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">

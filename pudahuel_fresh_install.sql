@@ -186,40 +186,94 @@ ALTER TABLE pudahuel_client_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pudahuel_shift_expenses ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para pudahuel_products
-CREATE POLICY "Permitir lectura pública de productos" ON pudahuel_products FOR SELECT USING (true);
-CREATE POLICY "Permitir inserción de productos" ON pudahuel_products FOR INSERT WITH CHECK (true);
-CREATE POLICY "Permitir actualización de productos" ON pudahuel_products FOR UPDATE USING (true);
-CREATE POLICY "Permitir eliminación de productos" ON pudahuel_products FOR DELETE USING (true);
+CREATE POLICY "Permitir lectura autenticada de productos"
+    ON pudahuel_products FOR SELECT TO authenticated
+    USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir inserción autenticada de productos"
+    ON pudahuel_products FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir actualización autenticada de productos"
+    ON pudahuel_products FOR UPDATE TO authenticated
+    USING (auth.uid() IS NOT NULL)
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir eliminación autenticada de productos"
+    ON pudahuel_products FOR DELETE TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 -- Políticas para pudahuel_clients
-CREATE POLICY "Permitir lectura pública de clientes" ON pudahuel_clients FOR SELECT USING (true);
-CREATE POLICY "Permitir inserción de clientes" ON pudahuel_clients FOR INSERT WITH CHECK (true);
-CREATE POLICY "Permitir actualización de clientes" ON pudahuel_clients FOR UPDATE USING (true);
-CREATE POLICY "Permitir eliminación de clientes" ON pudahuel_clients FOR DELETE USING (true);
+CREATE POLICY "Permitir lectura autenticada de clientes"
+    ON pudahuel_clients FOR SELECT TO authenticated
+    USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir inserción autenticada de clientes"
+    ON pudahuel_clients FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir actualización autenticada de clientes"
+    ON pudahuel_clients FOR UPDATE TO authenticated
+    USING (auth.uid() IS NOT NULL)
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir eliminación autenticada de clientes"
+    ON pudahuel_clients FOR DELETE TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 -- Políticas para pudahuel_shifts
-CREATE POLICY "Permitir lectura pública de turnos" ON pudahuel_shifts FOR SELECT USING (true);
-CREATE POLICY "Permitir inserción de turnos" ON pudahuel_shifts FOR INSERT WITH CHECK (true);
-CREATE POLICY "Permitir actualización de turnos" ON pudahuel_shifts FOR UPDATE USING (true);
-CREATE POLICY "Permitir eliminación de turnos" ON pudahuel_shifts FOR DELETE USING (true);
+CREATE POLICY "Permitir lectura autenticada de turnos"
+    ON pudahuel_shifts FOR SELECT TO authenticated
+    USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir inserción autenticada de turnos"
+    ON pudahuel_shifts FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir actualización autenticada de turnos"
+    ON pudahuel_shifts FOR UPDATE TO authenticated
+    USING (auth.uid() IS NOT NULL)
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir eliminación autenticada de turnos"
+    ON pudahuel_shifts FOR DELETE TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 -- Políticas para pudahuel_sales
-CREATE POLICY "Permitir lectura pública de ventas" ON pudahuel_sales FOR SELECT USING (true);
-CREATE POLICY "Permitir inserción de ventas" ON pudahuel_sales FOR INSERT WITH CHECK (true);
-CREATE POLICY "Permitir actualización de ventas" ON pudahuel_sales FOR UPDATE USING (true);
-CREATE POLICY "Permitir eliminación de ventas" ON pudahuel_sales FOR DELETE USING (true);
+CREATE POLICY "Permitir lectura autenticada de ventas"
+    ON pudahuel_sales FOR SELECT TO authenticated
+    USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir inserción autenticada de ventas"
+    ON pudahuel_sales FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir actualización autenticada de ventas"
+    ON pudahuel_sales FOR UPDATE TO authenticated
+    USING (auth.uid() IS NOT NULL)
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir eliminación autenticada de ventas"
+    ON pudahuel_sales FOR DELETE TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 -- Políticas para pudahuel_client_movements
-CREATE POLICY "Permitir lectura pública de movimientos" ON pudahuel_client_movements FOR SELECT USING (true);
-CREATE POLICY "Permitir inserción de movimientos" ON pudahuel_client_movements FOR INSERT WITH CHECK (true);
-CREATE POLICY "Permitir actualización de movimientos" ON pudahuel_client_movements FOR UPDATE USING (true);
-CREATE POLICY "Permitir eliminación de movimientos" ON pudahuel_client_movements FOR DELETE USING (true);
+CREATE POLICY "Permitir lectura autenticada de movimientos"
+    ON pudahuel_client_movements FOR SELECT TO authenticated
+    USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir inserción autenticada de movimientos"
+    ON pudahuel_client_movements FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir actualización autenticada de movimientos"
+    ON pudahuel_client_movements FOR UPDATE TO authenticated
+    USING (auth.uid() IS NOT NULL)
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir eliminación autenticada de movimientos"
+    ON pudahuel_client_movements FOR DELETE TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 -- Políticas para pudahuel_shift_expenses
-CREATE POLICY "Permitir lectura de gastos" ON pudahuel_shift_expenses FOR SELECT USING (true);
-CREATE POLICY "Permitir inserción de gastos" ON pudahuel_shift_expenses FOR INSERT WITH CHECK (true);
-CREATE POLICY "Permitir actualización de gastos" ON pudahuel_shift_expenses FOR UPDATE USING (true);
-CREATE POLICY "Permitir eliminación de gastos" ON pudahuel_shift_expenses FOR DELETE USING (true);
+CREATE POLICY "Permitir lectura autenticada de gastos"
+    ON pudahuel_shift_expenses FOR SELECT TO authenticated
+    USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir inserción autenticada de gastos"
+    ON pudahuel_shift_expenses FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir actualización autenticada de gastos"
+    ON pudahuel_shift_expenses FOR UPDATE TO authenticated
+    USING (auth.uid() IS NOT NULL)
+    WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Permitir eliminación autenticada de gastos"
+    ON pudahuel_shift_expenses FOR DELETE TO authenticated
+    USING (auth.uid() IS NOT NULL);
 
 -- ========================================
 -- PASO 5: CREAR VISTAS
