@@ -2560,6 +2560,22 @@ const AppContent = () => {
   const inventoryLoadError = productQuery.error instanceof Error ? productQuery.error.message : null;
   const salesLoadError = salesQuery.error instanceof Error ? salesQuery.error.message : null;
   const stockRequestsLoadError = stockRequestsQuery.error instanceof Error ? stockRequestsQuery.error.message : null;
+  useEffect(() => {
+    console.info("[Debug] lengths", {
+      products: products.length,
+      clients: clients.length,
+      sales: sales.length,
+      shifts: shifts.length,
+      stockRequests: stockRequests.length
+    });
+  }, [products.length, clients.length, sales.length, shifts.length, stockRequests.length]);
+  console.info("[Debug] lengths", {
+    products: products.length,
+    clients: clients.length,
+    sales: sales.length,
+    shifts: shifts.length,
+    stockRequests: stockRequests.length
+  });
   const hasMoreSalesPages = sales.length === SALES_PAGE_SIZE;
   const isSaleInsideCurrentPageWindow = useCallback(
     (createdAt: string) => {
