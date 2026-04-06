@@ -430,6 +430,8 @@ async function fetchProducts(): Promise<Product[]> {
     .order("name", { ascending: true })
     .range(0, PRODUCTS_FETCH_LIMIT - 1);
 
+  console.info("[Supabase] fetchProducts status", status, "rows", data?.length ?? 0, "error", error?.message);
+
   if (error) {
     if (status === 540 || error.message.toLowerCase().includes("project paused")) {
       throw new Error("Proyecto Supabase en pausa. Debes reactivarlo para leer inventario real.");
