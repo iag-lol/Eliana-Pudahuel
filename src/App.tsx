@@ -146,7 +146,7 @@ dayjs.locale("es");
 // Sistema de roles y contraseñas
 type Role = "admin" | "manager";
 
-const ADMIN_PASSWORD = "Romeo2026"; // Acceso completo
+const ADMIN_PASSWORD = "Zulu2026"; // Acceso completo
 
 type TabId = "dashboard" | "pos" | "inventory" | "fiados" | "reports" | "shifts";
 
@@ -2612,8 +2612,16 @@ const AppContent = () => {
         const [prodRes, clientRes, shiftRes, salesRes] = await Promise.all([
           supabase.from("pudahuel_products").select("id,name,barcode,category,price,stock").limit(PRODUCTS_FETCH_LIMIT),
           supabase.from("pudahuel_clients").select('id,name,authorized,balance,"limit"').limit(CLIENTS_FETCH_LIMIT),
-          supabase.from("pudahuel_shifts").select("id,seller,type,start_time,end_time,status,initial_cash").order("start_time", { ascending: false }).limit(SHIFTS_FETCH_LIMIT),
-          supabase.from("pudahuel_sales").select("id,ticket,type,total,payment_method,shift_id,client_id,created_at,items").order("created_at", { ascending: false }).limit(SALES_PAGE_SIZE)
+          supabase
+            .from("pudahuel_shifts")
+            .select("id,seller,type,start_time,end_time,status,initial_cash,cash_expected,cash_counted,difference,total_sales,tickets,payments_breakdown,total_expenses,created_at")
+            .order("start_time", { ascending: false })
+            .limit(SHIFTS_FETCH_LIMIT),
+          supabase
+            .from("pudahuel_sales")
+            .select("id,ticket,type,total,payment_method,cash_received,change_amount,shift_id,client_id,created_at,items")
+            .order("created_at", { ascending: false })
+            .limit(SALES_PAGE_SIZE)
         ]);
         if (!prodRes.error && prodRes.data) {
           const mapped = prodRes.data.map(mapProductRow);
@@ -4219,307 +4227,156 @@ const AppContent = () => {
 
   return (
     <AppShell
-      header={{ height: 72 }}
+      header={{ height: 64 }}
       navbar={{
-        width: sidebarCollapsed ? 80 : 280,
+        width: sidebarCollapsed ? 72 : 250,
         breakpoint: "md",
         collapsed: { mobile: true }
       }}
-      padding="lg"
+      padding="md"
     >
-      <AppShell.Header
-        style={{
-          background: "linear-gradient(110deg, #1e3a8a 0%, #312e81 40%, #0f172a 100%)",
-          borderBottom: "none",
-          boxShadow: "0 18px 45px rgba(15, 23, 42, 0.35)"
-        }}
-      >
-        <Group
-          justify="space-between"
-          align="center"
-          h="100%"
-          px="md"
-          wrap="nowrap"
-          gap="xs"
-        >
-          <Group gap="xs" align="center" wrap="nowrap">
-            <ThemeIcon
-              size={38}
-              radius="lg"
-              variant="gradient"
-              gradient={{ from: "blue.4", to: "cyan.4", deg: 120 }}
-            >
-              <LayoutDashboard size={20} />
-            </ThemeIcon>
-            <Stack gap={0} style={{ color: "white" }}>
-              <Text fw={700} fz={16} lh={1.2}>
-                Negocio Eliana Pudahuel
-              </Text>
-              <Text fz="xs" style={{ color: "rgba(255,255,255,0.75)" }}>
-                {now.format("ddd, D MMM • HH:mm")}
-              </Text>
-            </Stack>
-          </Group>
-          <Group gap="xs" align="center" wrap="nowrap">
-            {activeShift && (
-              <Badge
-                size="md"
-                variant="light"
-                style={{ background: "rgba(255,255,255,0.18)", color: "white", padding: "0.4rem 0.75rem" }}
-              >
-                {activeShift.seller} • {activeShift.type === "dia" ? "Día" : "Noche"}
-              </Badge>
+      {/* ══════════════ HEADER ══════════════ */}
+      <AppShell.Header style={{ background: "#fff", borderBottom: "1px solid #e8edf2", boxShadow: "0 1px 8px rgba(15,23,42,0.06)" }}>
+        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", gap: 10 }}>
+          {/* Logo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#4f46e5,#7c3aed)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 3px 10px rgba(79,70,229,0.3)", flexShrink: 0 }}>
+              <ShoppingBag size={18} color="#fff" />
+            </div>
+            {!isMobile && (
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a", letterSpacing: "-0.01em", lineHeight: 1.2 }}>Negocio Eliana</div>
+                <div style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{now.format("ddd D MMM · HH:mm")}</div>
+              </div>
             )}
+          </div>
+
+          {/* Turno activo (centro) */}
+          {activeShift && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "5px 13px", flexShrink: 0 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e" }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>{activeShift.seller}</span>
+              <span style={{ fontSize: 11, color: "#16a34a" }}>· {activeShift.type === "dia" ? "Día" : "Noche"}</span>
+            </div>
+          )}
+
+          {/* Acciones */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             {userRole && (
-              <ActionIcon
-                variant="light"
-                color="yellow"
-                size="md"
-                radius="md"
-                onClick={handleLockAdmin}
-                style={{ background: "rgba(255,255,255,0.18)" }}
-              >
-                <KeyRound size={16} />
-              </ActionIcon>
+              <button onClick={handleLockAdmin} style={{ display: "flex", alignItems: "center", gap: 5, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#92400e", fontFamily: "inherit" }}>
+                <KeyRound size={13} />{!isMobile && "Admin"}
+              </button>
             )}
+            <button onClick={() => setCustomerDisplay(v => !v)} title="Vista cliente" style={{ width: 34, height: 34, borderRadius: 8, background: customerDisplay ? "#fee2e2" : "#f0f4ff", border: `1px solid ${customerDisplay ? "#fca5a5" : "#c7d2fe"}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: customerDisplay ? "#dc2626" : "#4f46e5", fontFamily: "inherit" }}>
+              <MonitorPlay size={15} />
+            </button>
             {activeShift ? (
-              <Button
-                size="xs"
-                variant="light"
-                color="red"
-                onClick={() => {
-                  if (!activeShift) {
-                    notifications.show({
-                      title: "Sin turno activo",
-                      message: "No hay un turno abierto para cerrar.",
-                      color: "orange"
-                    });
-                    return;
-                  }
-                  setShiftModalMode("close");
-                  shiftModalHandlers.open();
-                }}
-                style={{ background: "rgba(255,255,255,0.18)", color: "white" }}
-              >
-                Cerrar
-              </Button>
+              <button onClick={() => { setShiftModalMode("close"); shiftModalHandlers.open(); }} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#dc2626", fontFamily: "inherit" }}>
+                <X size={13} />{!isMobile && "Cerrar turno"}
+              </button>
             ) : (
-              <Button
-                size="sm"
-                variant="gradient"
-                gradient={{ from: "teal", to: "cyan", deg: 135 }}
-                radius="md"
-                leftSection={<Clock3 size={16} />}
-                onClick={() => {
-                  setShiftModalMode("open");
-                  shiftModalHandlers.open();
-                }}
-                style={{
-                  boxShadow: "0 12px 30px rgba(12, 186, 186, 0.35)",
-                  color: "white",
-                  fontWeight: 700
-                }}
-              >
-                Abrir turno
-              </Button>
+              <button onClick={() => { setShiftModalMode("open"); shiftModalHandlers.open(); }} style={{ display: "flex", alignItems: "center", gap: 6, background: "linear-gradient(135deg,#4f46e5,#7c3aed)", border: "none", borderRadius: 9, padding: "8px 15px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#fff", boxShadow: "0 3px 12px rgba(79,70,229,0.3)", fontFamily: "inherit" }}>
+                <Clock3 size={14} />{!isMobile && "Abrir turno"}
+              </button>
             )}
-            <ActionIcon
-              variant="light"
-              size="md"
-              radius="md"
-              onClick={() => setCustomerDisplay((prev) => !prev)}
-              style={{
-                background: customerDisplay ? "rgba(248,113,113,0.25)" : "rgba(255,255,255,0.18)"
-              }}
-            >
-              <MonitorPlay size={16} color="white" />
-            </ActionIcon>
-          </Group>
-        </Group>
+          </div>
+        </div>
       </AppShell.Header>
 
-      <AppShell.Navbar p="md" className="sidebar-nav">
-        <Stack gap="md">
-          {/* Botón de colapso */}
-          <Group justify={sidebarCollapsed ? "center" : "flex-end"}>
-            <ActionIcon
-              variant="light"
-              color="indigo"
-              size="lg"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            >
-              {sidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-            </ActionIcon>
-          </Group>
+      {/* ══════════════ SIDEBAR ══════════════ */}
+      <AppShell.Navbar style={{ background: "#fff", borderRight: "1px solid #e8edf2", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Botón colapso */}
+        <div style={{ padding: "10px 12px", display: "flex", justifyContent: sidebarCollapsed ? "center" : "flex-end", borderBottom: "1px solid #f1f5f9" }}>
+          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={{ width: 30, height: 30, borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#64748b", fontFamily: "inherit" }}>
+            {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+          </button>
+        </div>
 
-          {!sidebarCollapsed ? (
-            <>
-              <Paper withBorder radius="lg" p="md">
-                {activeShift ? (
-                  <Stack gap="sm">
-                    <Group justify="space-between" align="flex-start">
-                      <Stack gap={2}>
-                        <Text fw={700}>Turno activo</Text>
-                        <Text size="xs" c="dimmed">
-                          {activeShift.seller} • desde {formatDateTime(activeShift.start)}
-                        </Text>
-                      </Stack>
-                      <Badge color="teal" variant="light">
-                        {activeShift.type === "dia" ? "Día" : "Noche"}
-                      </Badge>
-                    </Group>
-                    <Divider />
-                    <Group justify="space-between">
-                      <Text size="sm" c="dimmed">
-                        Total ventas
-                      </Text>
-                      <Text fw={700}>{formatCurrency(shiftSummary.total)}</Text>
-                    </Group>
-                    <Group justify="space-between">
-                      <Text size="sm" c="dimmed">
-                        Tickets
-                      </Text>
-                      <Text fw={700}>{shiftSummary.tickets}</Text>
-                    </Group>
-                    <Divider />
-                    <Group justify="space-between">
-                      <Text size="sm" c="dimmed" fw={600}>
-                        Efectivo en caja
-                      </Text>
-                      <Text fw={700} c="teal">
-                        {formatCurrency((activeShift.initial_cash ?? 0) + (shiftSummary.byPayment.cash ?? 0))}
-                      </Text>
-                    </Group>
-                    <Text size="xs" c="dimmed" pl="xs">
-                      Inicial: {formatCurrency(activeShift.initial_cash ?? 0)} + Ventas: {formatCurrency(shiftSummary.byPayment.cash ?? 0)}
-                    </Text>
-                    <Divider />
-                    {PAYMENT_ORDER.map((method) => (
-                      <Group key={method} justify="space-between">
-                        <Text size="xs" c="dimmed">
-                          {PAYMENT_LABELS[method].toUpperCase()}
-                        </Text>
-                        <Text fw={600}>{formatCurrency(shiftSummary.byPayment[method] ?? 0)}</Text>
-                      </Group>
-                    ))}
-                  </Stack>
-                ) : (
-                  <Stack gap="xs">
-                    <Text fw={700}>Sin turno activo</Text>
-                    <Text size="sm" c="dimmed">
-                      Registra la apertura desde el encabezado para comenzar a mostrar indicadores.
-                    </Text>
-                  </Stack>
-                )}
-              </Paper>
-
-              <Stack gap="xs">
-                {TABS.map((tab) => {
-                  const Icon = tab.icon;
-                  const isActive = activeTab === tab.id;
-                  const disabled = !hasAccess(tab);
-                  const lowStockCount = tab.id === "inventory" ? products.filter((p) => p.stock <= p.minStock).length : 0;
-
-                  return (
-                    <div
-                      key={tab.id}
-                      className={`nav-item ${isActive ? "active" : ""}`}
-                      onClick={() => guardTabChange(tab.id)}
-                      style={{ opacity: disabled ? 0.55 : 1 }}
-                    >
-                      <div className="nav-item-icon">
-                        <Icon size={22} />
-                      </div>
-                      <Text style={{ flex: 1 }}>{tab.label}</Text>
-                      {lowStockCount > 0 && !disabled && (
-                        <div className="nav-item-badge">
-                          {lowStockCount}
-                        </div>
-                      )}
-                      {disabled && (
-                        <Badge size="xs" color="gray" variant="dot">
-                          Bloqueado
-                        </Badge>
-                      )}
+        {/* Tarjeta turno (solo expandido) */}
+        {!sidebarCollapsed && (
+          <div style={{ padding: "10px 12px" }}>
+            {activeShift ? (
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12, padding: "11px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#15803d", textTransform: "uppercase", letterSpacing: "0.06em" }}>Turno activo</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#14532d", marginTop: 1 }}>{activeShift.seller}</div>
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#16a34a", background: "#dcfce7", borderRadius: 6, padding: "3px 8px" }}>{activeShift.type === "dia" ? "Día" : "Noche"}</div>
+                </div>
+                <div style={{ borderTop: "1px solid #bbf7d0", paddingTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                  {[
+                    { label: "Ventas", val: formatCurrency(shiftSummary.total), color: "#059669" },
+                    { label: "Tickets", val: shiftSummary.tickets, color: "#0f172a" },
+                    { label: "Efectivo", val: formatCurrency((activeShift.initial_cash ?? 0) + (shiftSummary.byPayment.cash ?? 0)), color: "#0284c7" },
+                  ].map(r => (
+                    <div key={r.label} style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 11, color: "#64748b" }}>{r.label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: r.color as string }}>{r.val}</span>
                     </div>
-                  );
-                })}
-              </Stack>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: "11px 12px" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 3 }}>Sin turno activo</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>Abre un turno para registrar ventas.</div>
+              </div>
+            )}
+          </div>
+        )}
 
-              <Paper withBorder p="md" radius="lg" style={{ background: "linear-gradient(135deg, rgba(15, 23, 42, 0.08), rgba(99, 102, 241, 0.12))" }}>
-                <Stack gap="xs">
-                  <Group gap="xs">
-                    <ThemeIcon color="indigo" variant="light" size="md">
-                      <TrendingUp size={18} />
-                    </ThemeIcon>
-                    <Text size="sm" fw={700} style={{ color: "#1f2937" }}>
-                      Análisis en tiempo real
-                    </Text>
-                  </Group>
-                  <Text size="xs" c="dimmed" style={{ lineHeight: 1.5 }}>
-                    Consulta métricas clave del turno y controla alertas de stock en un solo lugar.
-                  </Text>
-                </Stack>
-              </Paper>
+        {/* Navegación principal */}
+        <div style={{ flex: 1, overflowY: "auto", padding: sidebarCollapsed ? "6px 8px" : "6px 10px" }}>
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            const disabled = !hasAccess(tab);
+            const badge = tab.id === "inventory" ? products.filter(p => p.stock <= p.minStock).length : 0;
 
-              {userRole ? (
-                <Button variant="light" color="yellow" onClick={handleLockAdmin}>
-                  Cerrar sesión administrativa
-                </Button>
-              ) : (
-                <Button
-                  variant="gradient"
-                  gradient={{ from: "indigo", to: "blue", deg: 90 }}
-                  onClick={() => {
-                    setPendingTab(activeTab);
-                    passwordModalHandlers.open();
-                  }}
-                  leftSection={<ShieldCheck size={16} />}
-                >
-                  Desbloquear secciones
-                </Button>
-              )}
-            </>
-          ) : (
-            // Vista colapsada - solo iconos
-            <Stack gap="xs">
-              {TABS.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
-                const disabled = !hasAccess(tab);
-                const lowStockCount = tab.id === "inventory" ? products.filter((p) => p.stock <= p.minStock).length : 0;
+            if (sidebarCollapsed) {
+              return (
+                <Tooltip key={tab.id} label={tab.label} position="right" withArrow>
+                  <button onClick={() => guardTabChange(tab.id)} style={{ width: "100%", height: 42, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: isActive ? "linear-gradient(135deg,#4f46e5,#7c3aed)" : "transparent", border: "none", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1, color: isActive ? "#fff" : "#64748b", marginBottom: 3, position: "relative", transition: "all 0.15s", boxShadow: isActive ? "0 3px 10px rgba(79,70,229,0.28)" : "none", fontFamily: "inherit" }}>
+                    <Icon size={19} />
+                    {badge > 0 && !disabled && <div style={{ position: "absolute", top: 5, right: 5, width: 14, height: 14, borderRadius: "50%", background: "#ef4444", color: "#fff", fontSize: 8, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{badge}</div>}
+                  </button>
+                </Tooltip>
+              );
+            }
+            return (
+              <button key={tab.id} onClick={() => guardTabChange(tab.id)} style={{ width: "100%", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", marginBottom: 2, background: isActive ? "linear-gradient(135deg,rgba(79,70,229,0.1),rgba(124,58,237,0.08))" : "transparent", border: isActive ? "1px solid rgba(99,102,241,0.25)" : "1px solid transparent", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, color: isActive ? "#4f46e5" : "#64748b", fontSize: 13, fontWeight: isActive ? 700 : 500, textAlign: "left", transition: "all 0.15s", position: "relative", fontFamily: "inherit" }}
+                onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; }}
+                onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              >
+                <div style={{ width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: isActive ? "rgba(79,70,229,0.12)" : "#f1f5f9", flexShrink: 0 }}>
+                  <Icon size={16} />
+                </div>
+                <span style={{ flex: 1 }}>{tab.label}</span>
+                {badge > 0 && !disabled && <div style={{ minWidth: 18, height: 18, borderRadius: 999, background: "#ef4444", color: "#fff", fontSize: 9, fontWeight: 800, padding: "0 4px", display: "flex", alignItems: "center", justifyContent: "center" }}>{badge}</div>}
+                {disabled && <span style={{ fontSize: 9, color: "#cbd5e1", fontWeight: 700 }}>LOCK</span>}
+              </button>
+            );
+          })}
+        </div>
 
-                return (
-                  <Tooltip key={tab.id} label={tab.label} position="right" withArrow>
-                    <ActionIcon
-                      size="xl"
-                      variant={isActive ? "filled" : "light"}
-                      color={isActive ? "indigo" : "gray"}
-                      onClick={() => guardTabChange(tab.id)}
-                      style={{ opacity: disabled ? 0.55 : 1, position: "relative" }}
-                    >
-                      <Icon size={24} />
-                      {lowStockCount > 0 && !disabled && (
-                        <Badge
-                          size="xs"
-                          color="red"
-                          variant="filled"
-                          circle
-                          style={{ position: "absolute", top: -4, right: -4 }}
-                        >
-                          {lowStockCount}
-                        </Badge>
-                      )}
-                    </ActionIcon>
-                  </Tooltip>
-                );
-              })}
-            </Stack>
-          )}
-        </Stack>
+        {/* Footer admin */}
+        {!sidebarCollapsed && (
+          <div style={{ padding: "10px 12px", borderTop: "1px solid #f1f5f9" }}>
+            {userRole ? (
+              <button onClick={handleLockAdmin} style={{ width: "100%", padding: "9px 13px", borderRadius: 9, background: "#fffbeb", border: "1px solid #fde68a", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#92400e", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                <KeyRound size={13} /> Cerrar sesión admin
+              </button>
+            ) : (
+              <button onClick={() => { setPendingTab(activeTab); passwordModalHandlers.open(); }} style={{ width: "100%", padding: "9px 13px", borderRadius: 9, background: "linear-gradient(135deg,rgba(79,70,229,0.08),rgba(124,58,237,0.06))", border: "1px solid rgba(99,102,241,0.2)", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                <ShieldCheck size={13} /> Desbloquear secciones
+              </button>
+            )}
+          </div>
+        )}
       </AppShell.Navbar>
 
-      <AppShell.Main style={{ paddingBottom: "180px" }}>
+      <AppShell.Main style={{ background: "#f8fafc", paddingBottom: isMobile ? "120px" : "2rem" }}>
         <Notifications position="top-right" />
         {!currentTab ? null : (
           <Stack gap="xl">
@@ -4534,100 +4391,100 @@ const AppContent = () => {
               />
             )}
             {activeTab === "pos" && (
-              <Stack gap="xl">
-                <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-                  <Paper withBorder radius="lg" p="md" style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12), rgba(147,197,253,0.18))" }}>
-                    <Stack gap={4}>
-                      <Group justify="space-between">
-                        <Group gap="xs">
-                          <ThemeIcon variant="gradient" gradient={{ from: "blue", to: "cyan" }} radius="md">
-                            <TrendingUp size={18} />
-                          </ThemeIcon>
-                          <Text size="sm" c="dimmed">
-                            Ventas del turno
-                          </Text>
-                        </Group>
-                        <Badge size="sm" color="blue" variant="light">
-                          {activeShift ? "En curso" : "General"}
-                        </Badge>
-                      </Group>
-                      <Text fw={700} fz="xl">
-                        {formatCurrency(shiftSummary.total)}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {shiftSummary.tickets} tickets registrados ({formatCurrency(shiftSummary.byPayment.cash ?? 0)} en efectivo)
-                      </Text>
-                    </Stack>
-                  </Paper>
-                  <Paper withBorder radius="lg" p="md" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(45,212,191,0.18))" }}>
-                    <Stack gap={4}>
-                      <Group gap="xs">
-                        <ThemeIcon variant="gradient" gradient={{ from: "teal", to: "green" }} radius="md">
-                          <ShoppingCart size={18} />
-                        </ThemeIcon>
-                        <Text size="sm" c="dimmed">
-                          Carrito actual
-                        </Text>
-                      </Group>
-                      <Group justify="space-between" align="flex-end">
-                        <Text fw={700} fz="xl">
-                          {formatCurrency(cartTotals.total)}
-                        </Text>
-                        <Badge size="sm" color="teal" variant="light">
-                          {cartTotals.items} productos
-                        </Badge>
-                      </Group>
-                      <Text size="xs" c="dimmed">
-                        Selecciona el método de pago y confirma para generar el ticket.
-                      </Text>
-                    </Stack>
-                  </Paper>
-                  <Paper
-                    withBorder
-                    radius="lg"
-                    p="md"
-                    style={{
-                      background: "linear-gradient(135deg, rgba(251,191,36,0.14), rgba(251,146,60,0.18))",
-                      cursor: "pointer",
-                      transition: "all 0.2s ease"
-                    }}
+              <Stack gap="lg">
+                {/* KPI Cards del POS */}
+                <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+                  {/* Card 1: Ventas del turno */}
+                  <div className="kpi-card" style={{ borderTop: "3px solid #6366f1" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{
+                          width: 36, height: 36, borderRadius: 10,
+                          background: "linear-gradient(135deg, #4f46e5, #7c3aed)",
+                          display: "flex", alignItems: "center", justifyContent: "center"
+                        }}>
+                          <TrendingUp size={17} color="white" />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Ventas del turno
+                        </span>
+                      </div>
+                      <div style={{
+                        fontSize: 10, fontWeight: 700,
+                        background: activeShift ? "rgba(16,185,129,0.1)" : "rgba(100,116,139,0.1)",
+                        color: activeShift ? "#059669" : "#64748b",
+                        borderRadius: 6, padding: "3px 8px"
+                      }}>
+                        {activeShift ? "En curso" : "General"}
+                      </div>
+                    </div>
+                    <div className="kpi-val">{formatCurrency(shiftSummary.total)}</div>
+                    <div className="kpi-sub">{shiftSummary.tickets} tickets · {formatCurrency(shiftSummary.byPayment.cash ?? 0)} efectivo</div>
+                  </div>
+
+                  {/* Card 2: Carrito actual */}
+                  <div className="kpi-card" style={{ borderTop: "3px solid #14b8a6" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{
+                          width: 36, height: 36, borderRadius: 10,
+                          background: "linear-gradient(135deg, #14b8a6, #10b981)",
+                          display: "flex", alignItems: "center", justifyContent: "center"
+                        }}>
+                          <ShoppingCart size={17} color="white" />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Carrito
+                        </span>
+                      </div>
+                      {cartTotals.items > 0 && (
+                        <div style={{
+                          fontSize: 10, fontWeight: 700,
+                          background: "rgba(20,184,166,0.1)", color: "#0f766e",
+                          borderRadius: 6, padding: "3px 8px"
+                        }}>
+                          {cartTotals.items} ítem{cartTotals.items !== 1 ? "s" : ""}
+                        </div>
+                      )}
+                    </div>
+                    <div className="kpi-val" style={{ color: cartTotals.total > 0 ? "#14b8a6" : "#94a3b8" }}>
+                      {cartTotals.total > 0 ? formatCurrency(cartTotals.total) : "$0"}
+                    </div>
+                    <div className="kpi-sub">
+                      {cartTotals.total > 0 ? "Listo para cobrar" : "Sin productos en carrito"}
+                    </div>
+                  </div>
+
+                  {/* Card 3: Stock crítico */}
+                  <div
+                    className="kpi-card"
+                    style={{ borderTop: `3px solid ${lowStockProducts.length > 0 ? "#f59e0b" : "#10b981"}`, cursor: "pointer" }}
                     onClick={() => lowStockModalHandlers.open()}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = "translateY(-2px)";
-                      e.currentTarget.style.boxShadow = "0 8px 20px rgba(251, 146, 60, 0.3)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = "translateY(0)";
-                      e.currentTarget.style.boxShadow = "";
-                    }}
                   >
-                    <Stack gap={4}>
-                      <Group justify="space-between">
-                        <Group gap="xs">
-                          <ThemeIcon variant="gradient" gradient={{ from: "orange", to: "yellow" }} radius="md">
-                            <AlertTriangle size={18} />
-                          </ThemeIcon>
-                          <Text size="sm" c="dimmed">
-                            Stock crítico
-                          </Text>
-                        </Group>
-                        <ActionIcon variant="subtle" color="orange" size="sm">
-                          <Search size={16} />
-                        </ActionIcon>
-                      </Group>
-                      <Group justify="space-between" align="center">
-                        <Text fw={700} fz="xl">
-                          {lowStockProducts.length}
-                        </Text>
-                        <Badge color="orange" variant="light" size="sm">
-                          {lowStockProducts.length > 0 ? "Atención urgente" : "Todo en orden"}
-                        </Badge>
-                      </Group>
-                      <Text size="xs" c="dimmed">
-                        Click para ver detalle de productos bajo stock mínimo.
-                      </Text>
-                    </Stack>
-                  </Paper>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{
+                          width: 36, height: 36, borderRadius: 10,
+                          background: lowStockProducts.length > 0
+                            ? "linear-gradient(135deg, #f59e0b, #ef4444)"
+                            : "linear-gradient(135deg, #10b981, #14b8a6)",
+                          display: "flex", alignItems: "center", justifyContent: "center"
+                        }}>
+                          <AlertTriangle size={17} color="white" />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Stock crítico
+                        </span>
+                      </div>
+                      <Search size={14} color="#94a3b8" />
+                    </div>
+                    <div className="kpi-val" style={{ color: lowStockProducts.length > 0 ? "#f59e0b" : "#10b981" }}>
+                      {lowStockProducts.length}
+                    </div>
+                    <div className="kpi-sub">
+                      {lowStockProducts.length > 0 ? "Ver productos · clic aquí" : "Inventario saludable"}
+                    </div>
+                  </div>
                 </SimpleGrid>
                 <Card withBorder radius="lg" shadow="sm">
                   <Group justify="space-between" align="center">
@@ -4731,61 +4588,62 @@ const AppContent = () => {
                               </Group>
                             </Chip.Group>
                           </div>
-                          <ScrollArea h={isMobile ? 400 : 720}>
-                            <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
+                          <ScrollArea h={isMobile ? 420 : 720}>
+                            <SimpleGrid cols={{ base: 2, sm: 2, md: 3, lg: 4 }} spacing="sm">
                               {filteredProducts.map((product) => {
                                 const stockRatio = Math.min(
                                   100,
                                   Math.round((product.stock / Math.max(product.minStock || 1, 1)) * 100)
                                 );
+                                const isLow = product.stock <= product.minStock;
                                 return (
                                   <Card
                                     key={product.id}
-                                    withBorder
-                                    shadow="sm"
-                                    radius="lg"
+                                    className={`pos-product-card${isLow ? " low-stock" : ""}`}
+                                    p="sm"
                                     onClick={() => handleAddProductToCart(product.id)}
-                                    style={{ cursor: "pointer" }}
                                   >
-                                    <Stack gap="xs">
-                                      <Group justify="space-between" align="flex-start">
-                                        <Stack gap={4}>
-                                          <Text fw={600}>{product.name}</Text>
-                                          <Text size="sm" c="dimmed">
-                                            {product.category}
+                                    <Stack gap={6} style={{ height: "100%" }}>
+                                      {/* Fila superior: categoría + dot estado */}
+                                      <Group justify="space-between" align="center" wrap="nowrap" gap={4}>
+                                        <span className="pos-cat-badge">
+                                          {product.category}
+                                        </span>
+                                        <span
+                                          className={`pos-status-dot ${isLow ? "low" : "ok"}`}
+                                          title={isLow ? "Bajo stock" : "Disponible"}
+                                        />
+                                      </Group>
+
+                                      {/* Nombre del producto */}
+                                      <div className="pos-product-name">
+                                        {product.name}
+                                      </div>
+
+                                      {/* Precio destacado */}
+                                      <div className="pos-product-price">
+                                        {formatCurrency(product.price)}
+                                      </div>
+
+                                      {/* Barra de stock */}
+                                      <div style={{ marginTop: "auto" }}>
+                                        <Progress
+                                          value={stockRatio}
+                                          color={stockRatio < 30 ? "red" : stockRatio < 65 ? "orange" : "teal"}
+                                          radius="xl"
+                                          size="xs"
+                                        />
+                                        <Group justify="space-between" mt={4} wrap="nowrap">
+                                          <Text size="xs" c="dimmed" fw={500}>
+                                            {product.stock} uds
                                           </Text>
-                                        </Stack>
-                                        <Badge color="indigo" variant="light">
-                                          {formatCurrency(product.price)}
-                                        </Badge>
-                                      </Group>
-                                      <Group justify="space-between">
-                                        <Text size="sm" c="dimmed">
-                                          Stock actual: {product.stock}
-                                        </Text>
-                                        <Text size="sm" c="dimmed">
-                                          Mínimo: {product.minStock}
-                                        </Text>
-                                      </Group>
-                                      <Progress
-                                        value={stockRatio}
-                                        color={stockRatio < 50 ? "orange" : "teal"}
-                                        radius="xl"
-                                      />
-                                      <Group justify="space-between">
-                                        <Text size="xs" c="dimmed">
-                                          {product.barcode ? `SKU: ${product.barcode}` : "Sin código asignado"}
-                                        </Text>
-                                        {product.stock <= product.minStock ? (
-                                          <Badge color="orange" variant="light" size="sm">
-                                            Bajo stock
-                                          </Badge>
-                                        ) : (
-                                          <Badge color="teal" variant="light" size="sm">
-                                            Disponible
-                                          </Badge>
-                                        )}
-                                      </Group>
+                                          {isLow && (
+                                            <Text size="xs" fw={700} style={{ color: "var(--clr-amber)" }}>
+                                              Bajo stock
+                                            </Text>
+                                          )}
+                                        </Group>
+                                      </div>
                                     </Stack>
                                   </Card>
                                 );
@@ -5110,59 +4968,71 @@ const AppContent = () => {
       </AppShell.Main>
 
       {isMobile && (
-        <Paper
-          radius="xl"
-          shadow="lg"
-          withBorder
-          p="sm"
-          style={{
-            position: "fixed",
-            bottom: 16,
-            left: 16,
-            right: 16,
-            zIndex: 20
-          }}
-        >
-          <Stack gap="sm">
-            <Grid gutter="xs">
-              {TABS.map((tab) => {
-                const Icon = tab.icon;
-                const disabled = !hasAccess(tab);
-                return (
-                  <Grid.Col key={tab.id} span={12 / TABS.length}>
-                    <Button
-                      variant={activeTab === tab.id ? "light" : "subtle"}
-                      fullWidth
-                      onClick={() => guardTabChange(tab.id)}
-                      leftSection={<Icon size={18} />}
-                      style={{ opacity: disabled ? 0.6 : 1 }}
-                    >
-                      {tab.label}
-                    </Button>
-                  </Grid.Col>
-                );
-              })}
-            </Grid>
+        <div className="mobile-bottom-nav">
+          {/* Tabs de navegación principal */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              const disabled = !hasAccess(tab);
+              const lowStockCount = tab.id === "inventory" ? products.filter((p) => p.stock <= p.minStock).length : 0;
+              return (
+                <button
+                  key={tab.id}
+                  className={`mobile-nav-btn${isActive ? " active" : ""}`}
+                  onClick={() => guardTabChange(tab.id)}
+                  style={{ opacity: disabled ? 0.45 : 1, position: "relative" }}
+                  title={tab.label}
+                >
+                  <div style={{ position: "relative" }}>
+                    <Icon size={18} />
+                    {lowStockCount > 0 && !disabled && (
+                      <span style={{
+                        position: "absolute",
+                        top: -5, right: -6,
+                        background: "#ef4444",
+                        color: "white",
+                        borderRadius: 999,
+                        fontSize: "0.55rem",
+                        fontWeight: 800,
+                        padding: "1px 4px",
+                        lineHeight: 1.2
+                      }}>
+                        {lowStockCount}
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: "0.58rem", lineHeight: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 48 }}>
+                    {tab.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {/* Botón de admin */}
+          <div style={{ marginTop: 6 }}>
             {userRole ? (
-              <Button size="sm" variant="light" color="yellow" onClick={handleLockAdmin}>
-                Cerrar sesión administrativa
+              <Button size="xs" variant="light" color="yellow" fullWidth radius="xl" onClick={handleLockAdmin}>
+                Cerrar admin
               </Button>
             ) : (
               <Button
-                size="sm"
+                size="xs"
                 variant="gradient"
-                gradient={{ from: "indigo", to: "blue", deg: 90 }}
+                gradient={{ from: "indigo", to: "violet", deg: 135 }}
+                fullWidth
+                radius="xl"
+                leftSection={<ShieldCheck size={13} />}
                 onClick={() => {
                   setPendingTab(activeTab);
                   passwordModalHandlers.open();
                 }}
-                leftSection={<ShieldCheck size={16} />}
               >
-                Desbloquear secciones
+                Desbloquear
               </Button>
             )}
-          </Stack>
-        </Paper>
+          </div>
+        </div>
       )}
 
       <PasswordModal
